@@ -1,0 +1,33 @@
+CHEYYAR HUB - EMAIL OTP FIX
+
+FRONTEND
+1. Replace src/App.jsx with App.jsx from this package.
+2. Replace src/App.css with App.css from this package.
+3. Keep src/logo.png.
+4. Start the Vite app with: npm run dev
+
+WORKER
+1. Copy src.js into your Worker folder next to wrangler.toml.
+2. wrangler.toml must point to: main = "src.js"
+3. Keep FIREBASE_PROJECT_ID = "cheyyar-hub" (your actual Firebase Project ID).
+4. Keep ALLOWED_ORIGIN = "http://localhost:5174" while the frontend is running on port 5174.
+5. Deploy from the Worker folder:
+   npx wrangler deploy
+
+REQUIRED CLOUDFLARE SECRETS
+   npx wrangler secret put RESEND_API_KEY
+   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT
+
+For FIREBASE_SERVICE_ACCOUNT, paste the COMPLETE contents of the Firebase service-account JSON file.
+Do NOT put either secret in wrangler.toml.
+
+TEST
+Open the Worker root URL. It should return:
+{"ok":true,"service":"cheyyar-hub-email-otp"}
+
+Then open the Vite app and use:
+Email -> Send OTP -> email -> 6-digit OTP -> Verify & Continue
+
+CORS
+The Worker explicitly handles OPTIONS preflight and allows localhost:5173, localhost:5174,
+127.0.0.1:5173 and 127.0.0.1:5174. This fixes the browser NetworkError caused by CORS/preflight.

@@ -1,0 +1,4 @@
+Keep your current src/firebase.js unchanged.
+The new App.jsx still imports:
+  import { auth, db } from "./firebase";
+Do not replace your Firebase client config with a placeholder.

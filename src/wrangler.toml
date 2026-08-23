@@ -1,0 +1,13 @@
+name = "cheyyar-hub-email-otp"
+main = "src.js"
+compatibility_date = "2026-08-23"
+
+[vars]
+FIREBASE_PROJECT_ID = "cheyyar-hub"
+OTP_FROM = "Cheyyar Hub <onboarding@resend.dev>"
+ALLOWED_ORIGIN = "http://localhost:5174"
+
+[[kv_namespaces]]
+binding = "OTP_STORE"
+id = "0eff1c2db47a44a79d684bf238ddd710"
+preview_id = "ae2d0b63532d46689afd24a4c1638468"
