@@ -10,6 +10,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   updateProfile,
+  deleteUser,
 } from "firebase/auth";
 
 import {
@@ -881,37 +882,74 @@ function App() {
      ======================================================= */
 
   async function handleAuth(e) {
-
     e.preventDefault();
 
     setAuthError("");
     setAuthSubmitting(true);
 
     try {
+      /* =====================================================
+         LOGIN
+         ===================================================== */
 
-      if (
-        authMode === "login"
-      ) {
-
+      if (authMode === "login") {
         await signInWithEmailAndPassword(
           auth,
           email.trim(),
           password
         );
 
-      } else {
+        return;
+      }
 
-        const displayName =
-          name.trim() ||
-          "Cheyyar User";
 
-        const username =
-          displayName
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, "") ||
-          "cheyyaruser";
+      /* =====================================================
+         SIGNUP
+         ===================================================== */
 
-        const usernameSnap = await getDocs(
+      const displayName =
+        name.trim() || "Cheyyar User";
+
+      const username =
+        displayName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "") ||
+        "cheyyaruser";
+
+
+      /* =====================================================
+         CREATE FIREBASE AUTH ACCOUNT FIRST
+
+         This is important because Firestore rules require
+         request.auth to exist before reading /users.
+         ===================================================== */
+
+      const cred =
+        await createUserWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password
+        );
+
+
+      /* =====================================================
+         UPDATE AUTH PROFILE
+         ===================================================== */
+
+      await updateProfile(
+        cred.user,
+        {
+          displayName,
+        }
+      );
+
+
+      /* =====================================================
+         CHECK USERNAME AFTER AUTHENTICATION
+         ===================================================== */
+
+      const usernameSnap =
+        await getDocs(
           query(
             collection(db, "users"),
             where("username", "==", username),
@@ -919,57 +957,137 @@ function App() {
           )
         );
 
-        if (!usernameSnap.empty) {
-          throw new Error("That username is already taken. Please use a different name.");
+
+      /* =====================================================
+         USERNAME ALREADY EXISTS
+
+         Remove the newly-created Auth account so the user
+         can try again with another name.
+         ===================================================== */
+
+      if (!usernameSnap.empty) {
+        try {
+          await deleteUser(cred.user);
+        } catch (deleteError) {
+          console.error(
+            "Failed to remove temporary account:",
+            deleteError
+          );
         }
 
-        const cred =
-          await createUserWithEmailAndPassword(
-            auth,
-            email.trim(),
-            password
-          );
-
-        await updateProfile(
-          cred.user,
-          {
-            displayName,
-          }
+        throw new Error(
+          "That username is already taken. Please use a different name."
         );
-
-        await setDoc(
-          doc(
-            db,
-            "users",
-            cred.user.uid
-          ),
-          {
-            ...DEFAULT_PROFILE,
-            name: displayName,
-            username,
-            email:
-              email.trim(),
-            createdAt:
-              serverTimestamp(),
-          }
-        );
-
       }
 
-    } catch (err) {
 
-      console.error(err);
+      /* =====================================================
+         CREATE FIRESTORE PROFILE
+         ===================================================== */
+
+      await setDoc(
+        doc(
+          db,
+          "users",
+          cred.user.uid
+        ),
+        {
+          ...DEFAULT_PROFILE,
+          name: displayName,
+          username,
+          email: email.trim(),
+          createdAt: serverTimestamp(),
+        }
+      );
+
+
+      /* =====================================================
+         SUCCESS
+         ===================================================== */
+
+      setAuthError("");
+
+    } catch (err) {
+      console.error(
+        "Authentication error:",
+        err
+      );
+
+      let message =
+        err?.message ||
+        "Authentication failed";
+
+
+      /* =====================================================
+         FRIENDLY FIREBASE AUTH ERRORS
+         ===================================================== */
+
+      if (
+        err?.code ===
+        "auth/email-already-in-use"
+      ) {
+        message =
+          "This email is already registered. Please login.";
+      }
+
+      else if (
+        err?.code ===
+        "auth/invalid-email"
+      ) {
+        message =
+          "Please enter a valid email address.";
+      }
+
+      else if (
+        err?.code ===
+        "auth/weak-password"
+      ) {
+        message =
+          "Password must be at least 6 characters.";
+      }
+
+      else if (
+        err?.code ===
+        "auth/invalid-credential"
+      ) {
+        message =
+          "Invalid email or password.";
+      }
+
+      else if (
+        err?.code ===
+        "auth/user-not-found"
+      ) {
+        message =
+          "No account found with this email.";
+      }
+
+      else if (
+        err?.code ===
+        "auth/wrong-password"
+      ) {
+        message =
+          "Incorrect password.";
+      }
+
+      else if (
+        err?.code ===
+        "permission-denied"
+      ) {
+        message =
+          "Firestore permission denied. Please check Firestore rules.";
+      }
+
 
       setAuthError(
-        err.message
-          ?.replace("Firebase: ", "") ||
-        "Authentication failed"
+        message.replace(
+          "Firebase: ",
+          ""
+        )
       );
 
     } finally {
-
       setAuthSubmitting(false);
-
     }
   }
 
