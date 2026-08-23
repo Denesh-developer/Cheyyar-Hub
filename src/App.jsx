@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import logo from "./assets/logo.png";
 
 import { auth, db } from "./firebase";
-import logo from "./logo.png";
 
 import {
   onAuthStateChanged,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
   updateProfile,
 } from "firebase/auth";
@@ -49,9 +48,7 @@ const CLOUDINARY_UPLOAD_PRESET =
    DEFAULT PROFILE
    ========================================================= */
 
-const DEVELOPER_UID = "jOEPdQMoVsajzkIjiAeEnMoxqDf2";
-
-const EMAIL_FOR_SIGN_IN_KEY = "cheyyarhub_emailForSignIn";
+const DEVELOPER_UID = import.meta.env.VITE_DEVELOPER_UID || "TtgTvNZ0XXRdem1B2bn1hXA4tzs2";
 
 const DEFAULT_PROFILE = {
   name: "Cheyyar User",
@@ -67,18 +64,46 @@ const DEFAULT_PROFILE = {
 };
 
 
-function VerifiedBadge({ developer = false }) {
+function VerifiedBadge({ developer = false, large = false }) {
   if (developer) {
     return (
-      <span className="developer-badge" title="Founder & Developer">
-        👨‍💻
+      <span
+        className={`developer-badge ${large ? "large" : ""}`.trim()}
+        title="Cheyyar Hub Developer"
+        aria-label="Cheyyar Hub Developer"
+      >
+        🛡️
       </span>
     );
   }
 
   return (
-    <span className="verified-badge" title="Verified">
+    <span
+      className={`verified-badge ${large ? "large" : ""}`.trim()}
+      title="Verified account"
+      aria-label="Verified account"
+    >
       ✓
+    </span>
+  );
+}
+
+function UserName({ profile, children, className = "" }) {
+  const isDeveloper = profile?.id === DEVELOPER_UID;
+  const isVerified = !isDeveloper && profile?.verified === true;
+
+  return (
+    <span className={`identity-name ${className}`.trim()}>
+      <span>{children ?? profile?.name ?? "Cheyyar Member"}</span>
+      {isDeveloper ? <VerifiedBadge developer /> : isVerified ? <VerifiedBadge /> : null}
+    </span>
+  );
+}
+
+function UserHandle({ profile, className = "" }) {
+  return (
+    <span className={`identity-handle ${className}`.trim()}>
+      @{profile?.username || "member"}
     </span>
   );
 }
@@ -278,20 +303,26 @@ function App() {
 
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [authMode, setAuthMode] = useState("login");
-  const [authError, setAuthError] = useState("");
-  const [email, setEmail] = useState("");
-  const [authSubmitting, setAuthSubmitting] = useState(false);
-  const [linkSent, setLinkSent] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const [completingSignIn, setCompletingSignIn] = useState(false);
-  const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
-  const [profileSetupName, setProfileSetupName] = useState("");
-  const [profileSetupUsername, setProfileSetupUsername] = useState("");
-  const [profileSetupSaving, setProfileSetupSaving] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
-  const [splashFading, setSplashFading] = useState(false);
-  const splashStartedAt = useRef(Date.now());
+  const [authMode, setAuthMode] =
+    useState("login");
+
+  const [authError, setAuthError] =
+    useState("");
+
+  const [email, setEmail] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
+  const [name, setName] =
+    useState("");
+
+  const [authSubmitting, setAuthSubmitting] =
+    useState(false);
+
+  const [showPassword, setShowPassword] =
+    useState(false);
 
   /* PAGE */
 
@@ -301,42 +332,6 @@ function App() {
   const isDeveloper = Boolean(user?.uid && DEVELOPER_UID && user.uid === DEVELOPER_UID);
   const [developerSearch, setDeveloperSearch] = useState("");
   const [developerSavingUid, setDeveloperSavingUid] = useState("");
-
-  async function toggleVerification(targetUser) {
-    if (!isDeveloper) {
-      setToast("Developer access required.");
-      return;
-    }
-
-    if (!targetUser?.id) return;
-
-    try {
-      const newVerified = !targetUser.verified;
-
-      await updateDoc(doc(db, "users", targetUser.id), {
-        verified: newVerified,
-        verifiedBy: newVerified ? user.uid : "",
-        verifiedAt: newVerified ? serverTimestamp() : null,
-      });
-
-      setUsers((current) =>
-        current.map((item) =>
-          item.id === targetUser.id
-            ? { ...item, verified: newVerified }
-            : item
-        )
-      );
-
-      setToast(
-        newVerified
-          ? `@${targetUser.username} verified ✓`
-          : `@${targetUser.username} unverified`
-      );
-    } catch (error) {
-      console.error("Verification:", error);
-      setToast(error?.message || "Could not update verification.");
-    }
-  }
 
 
   /* PROFILE */
@@ -452,85 +447,10 @@ function App() {
 
 
   /* =======================================================
-     SPLASH
-     ======================================================= */
-
-  useEffect(() => {
-    if (authLoading) return;
-
-    const elapsed = Date.now() - splashStartedAt.current;
-    const wait = Math.max(0, 1800 - elapsed);
-
-    const fadeTimer = setTimeout(() => {
-      setSplashFading(true);
-    }, wait);
-
-    const hideTimer = setTimeout(() => {
-      setShowSplash(false);
-    }, wait + 380);
-
-    return () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(hideTimer);
-    };
-  }, [authLoading]);
-
-
-  /* =======================================================
      AUTH STATE
      ======================================================= */
 
   useEffect(() => {
-
-    async function completeEmailLinkSignIn() {
-
-      if (!isSignInWithEmailLink(auth, window.location.href)) {
-        return;
-      }
-
-      let storedEmail = window.localStorage.getItem(EMAIL_FOR_SIGN_IN_KEY);
-
-      if (!storedEmail) {
-        storedEmail = window.prompt(
-          "Please confirm your email to finish signing in"
-        );
-      }
-
-      if (!storedEmail) {
-        setAuthError(
-          "Could not confirm your email. Please request a new sign-in link."
-        );
-        return;
-      }
-
-      setCompletingSignIn(true);
-
-      try {
-        await signInWithEmailLink(
-          auth,
-          storedEmail,
-          window.location.href
-        );
-
-        window.localStorage.removeItem(EMAIL_FOR_SIGN_IN_KEY);
-
-        window.history.replaceState(
-          {},
-          document.title,
-          window.location.pathname
-        );
-      } catch (error) {
-        console.error("Complete sign-in:", error);
-        setAuthError(
-          error?.message ||
-            "This sign-in link is invalid or has expired. Please request a new one."
-        );
-      } finally {
-        setCompletingSignIn(false);
-      }
-    }
-
-    completeEmailLinkSignIn();
 
     const unsub = onAuthStateChanged(
       auth,
@@ -565,23 +485,43 @@ function App() {
         if (snap.exists()) {
 
           const p = {
+            id: user.uid,
             ...DEFAULT_PROFILE,
             ...snap.data(),
           };
 
           setProfile(p);
           setEdit(p);
-          setNeedsProfileSetup(false);
 
         } else {
-          setNeedsProfileSetup(true);
-          setProfileSetupName(user.displayName || "");
-          setProfileSetupUsername(
-            (user.displayName || "")
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, "")
-              .slice(0, 20)
+
+          const newProfile = {
+            id: user.uid,
+            ...DEFAULT_PROFILE,
+            name:
+              user.displayName ||
+              "Cheyyar User",
+            username:
+              (
+                user.displayName ||
+                "cheyyaruser"
+              )
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, ""),
+            email:
+              user.email || "",
+            createdAt:
+              serverTimestamp(),
+          };
+
+          await setDoc(
+            userRef,
+            newProfile,
+            { merge: true }
           );
+
+          setProfile(newProfile);
+          setEdit(newProfile);
         }
 
         setProfileLoading(false);
@@ -937,142 +877,102 @@ function App() {
 
 
   /* =======================================================
-     EMAIL LINK AUTH (Firebase passwordless)
+     AUTH
      ======================================================= */
 
-  function normalizeEmail(value) {
-    return value.trim().toLowerCase();
-  }
+  async function handleAuth(e) {
 
-  async function sendLoginLink(e) {
-    e?.preventDefault();
-
-    const normalizedEmail = normalizeEmail(email);
-
-    if (!normalizedEmail || !normalizedEmail.includes("@")) {
-      setAuthError("Enter a valid email address.");
-      return;
-    }
-
-    if (resendCooldown > 0) return;
+    e.preventDefault();
 
     setAuthError("");
     setAuthSubmitting(true);
 
     try {
-      const actionCodeSettings = {
-        url: `${window.location.origin}${window.location.pathname}`,
-        handleCodeInApp: true,
-      };
 
-      await sendSignInLinkToEmail(
-        auth,
-        normalizedEmail,
-        actionCodeSettings
-      );
+      if (
+        authMode === "login"
+      ) {
 
-      window.localStorage.setItem(
-        EMAIL_FOR_SIGN_IN_KEY,
-        normalizedEmail
-      );
+        await signInWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password
+        );
 
-      setEmail(normalizedEmail);
-      setLinkSent(true);
-      setResendCooldown(30);
-    } catch (error) {
-      console.error("Send login link:", error);
-      setAuthError(
-        error?.message || "Could not send the sign-in link."
-      );
-    } finally {
-      setAuthSubmitting(false);
-    }
-  }
+      } else {
 
-  function useDifferentEmail() {
-    setLinkSent(false);
-    setAuthError("");
-    window.localStorage.removeItem(EMAIL_FOR_SIGN_IN_KEY);
-  }
+        const displayName =
+          name.trim() ||
+          "Cheyyar User";
 
-  async function resendLoginLink() {
-    if (resendCooldown > 0 || authSubmitting) return;
-    await sendLoginLink();
-  }
+        const username =
+          displayName
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "") ||
+          "cheyyaruser";
 
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setResendCooldown((value) => Math.max(0, value - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [resendCooldown]);
+        const usernameSnap = await getDocs(
+          query(
+            collection(db, "users"),
+            where("username", "==", username),
+            limit(1)
+          )
+        );
 
-  async function completeProfileSetup(e) {
-    e?.preventDefault();
+        if (!usernameSnap.empty) {
+          throw new Error("That username is already taken. Please use a different name.");
+        }
 
-    if (!user) return;
+        const cred =
+          await createUserWithEmailAndPassword(
+            auth,
+            email.trim(),
+            password
+          );
 
-    const cleanName = profileSetupName.trim();
-    const cleanUsername = profileSetupUsername
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, "")
-      .replace(/[^a-z0-9_]/g, "")
-      .slice(0, 20);
+        await updateProfile(
+          cred.user,
+          {
+            displayName,
+          }
+        );
 
-    if (cleanName.length < 2) {
-      setAuthError("Enter your name.");
-      return;
-    }
+        await setDoc(
+          doc(
+            db,
+            "users",
+            cred.user.uid
+          ),
+          {
+            ...DEFAULT_PROFILE,
+            name: displayName,
+            username,
+            email:
+              email.trim(),
+            createdAt:
+              serverTimestamp(),
+          }
+        );
 
-    if (cleanUsername.length < 3) {
-      setAuthError("Username must contain at least 3 letters or numbers.");
-      return;
-    }
-
-    setAuthError("");
-    setProfileSetupSaving(true);
-
-    try {
-      const usernameSnap = await getDocs(
-        query(
-          collection(db, "users"),
-          where("username", "==", cleanUsername),
-          limit(2)
-        )
-      );
-
-      const usernameTaken = usernameSnap.docs.some(
-        (item) => item.id !== user.uid
-      );
-
-      if (usernameTaken) {
-        throw new Error("That username is already taken. Please choose another.");
       }
 
-      const newProfile = {
-        ...DEFAULT_PROFILE,
-        name: cleanName,
-        username: cleanUsername,
-        email: user.email || email.trim().toLowerCase(),
-        createdAt: serverTimestamp(),
-      };
+    } catch (err) {
 
-      await setDoc(doc(db, "users", user.uid), newProfile, { merge: true });
-      await updateProfile(user, { displayName: cleanName });
+      console.error(err);
 
-      setProfile(newProfile);
-      setEdit(newProfile);
-      setNeedsProfileSetup(false);
-      setToast("Account created successfully 🎉");
-    } catch (error) {
-      console.error("Profile setup:", error);
-      setAuthError(error?.message || "Could not create your profile.");
+      setAuthError(
+        err.message
+          ?.replace("Firebase: ", "") ||
+        "Authentication failed"
+      );
+
     } finally {
-      setProfileSetupSaving(false);
+
+      setAuthSubmitting(false);
+
     }
   }
+
 
   /* =======================================================
      NOTIFICATION CREATOR
@@ -1599,6 +1499,7 @@ function App() {
       const { verified: _ignoredVerified, ...safeEdit } = edit || {};
 
       const updatedProfile = {
+        id: user.uid,
         ...safeEdit,
         verified: profile.verified === true,
         name:
@@ -1708,8 +1609,8 @@ function App() {
     try {
       await updateDoc(doc(db, "users", target.id), {
         verified: Boolean(nextVerified),
-        verifiedBy: user.uid,
-        verifiedAt: serverTimestamp(),
+        verifiedBy: nextVerified ? user.uid : "",
+        verifiedAt: nextVerified ? serverTimestamp() : null,
       });
 
       setToast(
@@ -2045,49 +1946,71 @@ function App() {
 
 
   /* =======================================================
-     SPLASH / AUTH / PROFILE SETUP
+     LOADING
      ======================================================= */
 
-  if (showSplash) {
+  if (authLoading) {
+
     return (
-      <div className={splashFading ? "splash-screen fade-out" : "splash-screen"}>
-        <div className="splash-content">
-          <div className="splash-logo-ring">
-            <img className="splash-logo" src={logo} alt="Cheyyar Hub" />
-          </div>
-          <div className="splash-brand">
-            cheyyar<span>hub</span>
-          </div>
-          <p className="splash-tagline">
-            Our town. Our people. Our stories.
-          </p>
+      <div className="loading-screen">
+
+        <div className="splash-glow" />
+
+        <div className="splash-logo-wrap">
+          <img
+            src={logo}
+            alt="Cheyyar Hub"
+            className="splash-logo"
+          />
         </div>
+
+        <div className="splash-brand">
+          cheyyar<span>hub</span>
+        </div>
+
+        <p className="splash-tagline">
+          Our town. Our people. Our stories.
+        </p>
+
+        <div className="splash-loader">
+          <span />
+          <span />
+          <span />
+        </div>
+
       </div>
     );
   }
 
-  if (authLoading) {
-    return <div className="loading-screen">Loading Cheyyar Hub...</div>;
-  }
 
-  if (completingSignIn) {
-    return <div className="loading-screen">Signing you in...</div>;
-  }
+  /* =======================================================
+     LOGIN
+     ======================================================= */
 
   if (!user) {
+
     return (
       <div className="auth-screen">
+
         <div className="auth-glow auth-glow-1" />
         <div className="auth-glow auth-glow-2" />
 
         <div className="auth-wrap">
+
+          {/* VISUAL / BRAND SIDE */}
+
           <div className="auth-visual">
-            <div className="brand big">cheyyar<span>hub</span></div>
+
+            <div className="brand big">
+              cheyyar<span>hub</span>
+            </div>
+
             <p className="auth-visual-tagline">
               Our town. Our people. Our stories.
             </p>
 
             <div className="auth-feature-list">
+
               <div className="auth-feature">
                 <span className="auth-feature-icon">📍</span>
                 <div>
@@ -2095,6 +2018,7 @@ function App() {
                   <p>Everything happening around Cheyyar, in one feed.</p>
                 </div>
               </div>
+
               <div className="auth-feature">
                 <span className="auth-feature-icon">💬</span>
                 <div>
@@ -2102,6 +2026,7 @@ function App() {
                   <p>Chat, follow, and support people in your town.</p>
                 </div>
               </div>
+
               <div className="auth-feature">
                 <span className="auth-feature-icon">🎉</span>
                 <div>
@@ -2109,165 +2034,178 @@ function App() {
                   <p>Events, jobs, and local help — updated live.</p>
                 </div>
               </div>
+
             </div>
+
           </div>
+
+
+          {/* FORM SIDE */}
 
           <form
             className="auth-card"
-            onSubmit={sendLoginLink}
+            onSubmit={handleAuth}
           >
+
             <div className="brand auth-card-brand">
               cheyyar<span>hub</span>
             </div>
 
-            <div className="auth-card-logo-mobile">
-              <img src={logo} alt="Cheyyar Hub" />
+            <div className="auth-tabs">
+
+              <button
+                type="button"
+                className={
+                  authMode === "login"
+                    ? "auth-tab active"
+                    : "auth-tab"
+                }
+                onClick={() => {
+                  setAuthMode("login");
+                  setAuthError("");
+                }}
+              >
+                Login
+              </button>
+
+              <button
+                type="button"
+                className={
+                  authMode === "signup"
+                    ? "auth-tab active"
+                    : "auth-tab"
+                }
+                onClick={() => {
+                  setAuthMode("signup");
+                  setAuthError("");
+                }}
+              >
+                Sign up
+              </button>
+
             </div>
 
-            {!linkSent ? (
-              <>
-                <div className="auth-pill">🔐 Passwordless login</div>
-                <h2>Welcome to Cheyyar Hub 👋</h2>
-                <p className="tagline">
-                  Enter your email to continue. We'll send you a secure sign-in link.
-                </p>
+            <h2>
+              {authMode === "login"
+                ? "Welcome back 👋"
+                : "Join Cheyyar Hub"}
+            </h2>
 
-                <div className="input-group">
-                  <span className="input-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                      <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" strokeWidth="1.6" />
-                      <path d="m4 7 8 6 8-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setAuthError("");
-                    }}
-                    placeholder="Email address"
-                    autoComplete="email"
-                    inputMode="email"
-                    required
-                  />
-                </div>
+            <p className="tagline">
+              {authMode === "login"
+                ? "Login to continue to your feed."
+                : "Create your account, it only takes a minute."}
+            </p>
 
-                {authError && <div className="error">{authError}</div>}
-
-                <button
-                  className="primary full auth-submit"
-                  type="submit"
-                  disabled={authSubmitting}
-                >
-                  {authSubmitting ? (
-                    <span className="auth-spinner" aria-hidden="true" />
-                  ) : (
-                    "Send Sign-In Link"
-                  )}
-                </button>
-
-                <p className="auth-note">
-                  No password required. We'll email you a secure link to sign in.
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="otp-header">
-                  <button type="button" className="otp-back" onClick={useDifferentEmail}>
-                    ←
-                  </button>
-                  <div>
-                    <div className="auth-pill">✉️ Link sent</div>
-                    <h2>Check your email</h2>
-                  </div>
-                </div>
-
-                <p className="tagline">
-                  We sent a sign-in link to <strong>{email}</strong>. Open it on
-                  this device to finish signing in.
-                </p>
-
-                {authError && <div className="error">{authError}</div>}
-
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={resendLoginLink}
-                  disabled={resendCooldown > 0 || authSubmitting}
-                >
-                  {resendCooldown > 0
-                    ? `Resend link in ${resendCooldown}s`
-                    : "Resend link"}
-                </button>
-
-                <p className="auth-note">
-                  Didn't receive it? Check Spam/Junk, then resend the link.
-                </p>
-              </>
+            {authMode === "signup" && (
+              <div className="input-group">
+                <span className="input-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M4 20.5c1.4-3.6 4.6-5.5 8-5.5s6.6 1.9 8 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <input
+                  value={name}
+                  onChange={(e) =>
+                    setName(e.target.value)
+                  }
+                  placeholder="Your name"
+                  required
+                />
+              </div>
             )}
+
+            <div className="input-group">
+              <span className="input-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="m4 7 8 6 8-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) =>
+                  setEmail(e.target.value)
+                }
+                placeholder="Email address"
+                required
+              />
+            </div>
+
+            <div className="input-group">
+              <span className="input-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="M7.5 10.5V7.8a4.5 4.5 0 0 1 9 0v2.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </span>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) =>
+                  setPassword(e.target.value)
+                }
+                placeholder="Password"
+                minLength={6}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={
+                  showPassword ? "Hide password" : "Show password"
+                }
+              >
+                {showPassword ? "🙈" : "👁️"}
+              </button>
+            </div>
+
+            {authError && (
+              <div className="error">
+                {authError}
+              </div>
+            )}
+
+            <button
+              className="primary full auth-submit"
+              type="submit"
+              disabled={authSubmitting}
+            >
+              {authSubmitting ? (
+                <span className="auth-spinner" aria-hidden="true" />
+              ) : authMode === "login" ? (
+                "Login"
+              ) : (
+                "Create account"
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="text-btn"
+              onClick={() =>
+                setAuthMode(
+                  authMode === "login"
+                    ? "signup"
+                    : "login"
+                )
+              }
+            >
+              {authMode === "login"
+                ? "New here? Create account"
+                : "Already have an account? Login"}
+            </button>
+
           </form>
+
         </div>
       </div>
     );
   }
 
-  if (user && profileLoading) {
-    return <div className="loading-screen">Loading your profile...</div>;
-  }
-
-  if (needsProfileSetup) {
-    return (
-      <div className="auth-screen profile-setup-screen">
-        <div className="auth-glow auth-glow-1" />
-        <div className="auth-glow auth-glow-2" />
-        <form className="profile-setup-card" onSubmit={completeProfileSetup}>
-          <div className="profile-setup-logo">
-            <img src={logo} alt="Cheyyar Hub" />
-          </div>
-          <div className="brand">cheyyar<span>hub</span></div>
-          <h2>Welcome to Cheyyar Hub 🎉</h2>
-          <p className="tagline">Your email is verified. Create your public profile to continue.</p>
-
-          <div className="input-group">
-            <span className="input-icon">👤</span>
-            <input
-              value={profileSetupName}
-              onChange={(e) => setProfileSetupName(e.target.value)}
-              placeholder="Your name"
-              autoComplete="name"
-              required
-            />
-          </div>
-
-          <div className="input-group">
-            <span className="input-icon">@</span>
-            <input
-              value={profileSetupUsername}
-              onChange={(e) =>
-                setProfileSetupUsername(
-                  e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 20)
-                )
-              }
-              placeholder="username"
-              autoComplete="username"
-              required
-            />
-          </div>
-
-          {authError && <div className="error">{authError}</div>}
-
-          <button className="primary full auth-submit" type="submit" disabled={profileSetupSaving}>
-            {profileSetupSaving ? (
-              <span className="auth-spinner" aria-hidden="true" />
-            ) : (
-              "Create my account"
-            )}
-          </button>
-        </form>
-      </div>
-    );
-  }
 
   /* =======================================================
      NAV
@@ -2340,7 +2278,7 @@ function App() {
             className="user-chip"
           >
             <Avatar profile={profile} size="small" />
-            <span>{profile.username}</span>
+            <UserHandle profile={profile} />
           </button>
 
         </div>
@@ -2395,69 +2333,6 @@ function App() {
 
 
       <main className="layout">
-      {page === "developer" && isDeveloper && (
-  <section className="developer-panel">
-    <div className="developer-panel-header">
-      <div>
-        <span className="eyebrow">
-          CHEYYAR HUB
-        </span>
-
-        <h1>
-          👨‍💻 Developer Panel
-        </h1>
-
-        <p>
-          Manage verified users.
-        </p>
-      </div>
-    </div>
-
-    <div className="developer-user-list">
-      {users
-        .filter(
-          (item) =>
-            item.id !== DEVELOPER_UID
-        )
-        .map((item) => (
-          <div
-            className="developer-user"
-            key={item.id}
-          >
-            <Avatar
-              profile={item}
-              size="small"
-            />
-
-            <div className="developer-user-info">
-              <strong>
-                {item.name || "Cheyyar User"}
-              </strong>
-
-              <span>
-                @{item.username}
-              </span>
-            </div>
-
-            <button
-              className={
-                item.verified
-                  ? "unverify-btn"
-                  : "verify-btn"
-              }
-              onClick={() =>
-                toggleVerification(item)
-              }
-            >
-              {item.verified
-                ? "✓ Verified"
-                : "🔵 Verify"}
-            </button>
-          </div>
-        ))}
-    </div>
-  </section>
-)}
         {/* SIDEBAR */}
 
         <aside className="sidebar">
@@ -2473,14 +2348,9 @@ function App() {
               profile={profile}
             />
 
-            <div>
-              <strong>
-                {profile.name}
-              </strong>
-
-              <span>
-                @{profile.username}
-              </span>
+            <div className="side-profile-identity">
+              <UserName profile={profile} />
+              <UserHandle profile={profile} />
             </div>
 
           </div>
@@ -2539,6 +2409,36 @@ function App() {
         {/* CONTENT */}
 
         <section className="content">
+
+          {viewingUser ? (
+
+            <UserProfileView
+              target={viewingUser}
+              currentUser={user}
+              currentProfile={profile}
+              targetPosts={posts.filter(
+                (p) => p.authorId === viewingUser.id
+              )}
+              isFollowing={(profile.following || []).includes(viewingUser.id)}
+              onFollow={follow}
+              onMessage={(target) => {
+                setViewingUser(null);
+                openChat(target);
+                nav("messages");
+              }}
+              onBack={() => setViewingUser(null)}
+              onLike={toggleLike}
+              onComment={addComment}
+              onOpenComments={loadComments}
+              commentsOpen={commentsOpen}
+              comments={comments}
+              commentText={commentText}
+              setCommentText={setCommentText}
+              users={users}
+            />
+
+          ) : (
+            <>
 
           {/* HOME */}
 
@@ -2765,6 +2665,9 @@ function App() {
               notifications={
                 notifications
               }
+              users={
+                users
+              }
               onRead={
                 markNotificationRead
               }
@@ -2817,6 +2720,7 @@ function App() {
               currentUser={
                 user
               }
+              onViewProfile={(target) => setViewingUser(target)}
             />
           )}
 
@@ -2891,6 +2795,9 @@ function App() {
             />
           )}
 
+            </>
+          )}
+
         </section>
 
 
@@ -2948,22 +2855,6 @@ function App() {
 
       </main>
 
-
-      {viewingUser && (
-        <UserProfileModal
-          target={viewingUser}
-          currentUser={user}
-          currentProfile={profile}
-          isFollowing={(profile.following || []).includes(viewingUser.id)}
-          onFollow={follow}
-          onMessage={(target) => {
-            setViewingUser(null);
-            openChat(target);
-            nav("messages");
-          }}
-          onClose={() => setViewingUser(null)}
-        />
-      )}
 
       {founderOpen && (
         <FounderModal onClose={() => setFounderOpen(false)} />
@@ -3032,7 +2923,7 @@ function DeveloperPanel({ users, search, setSearch, savingUid, onVerify }) {
     <div className="developer-page">
       <div className="page-heading developer-heading">
         <div>
-          <span>🛡️ Developer Panel</span>
+          <span><VerifiedBadge developer /> Developer Panel</span>
           <p>Manage the official Cheyyar Hub verified badge.</p>
         </div>
         <div className="developer-secure-pill">Founder access only</div>
@@ -3057,7 +2948,7 @@ function DeveloperPanel({ users, search, setSearch, savingUid, onVerify }) {
         </div>
 
         <div className="developer-user-list">
-          {users.map((u) => {
+          {users.filter((u) => u.id !== DEVELOPER_UID).map((u) => {
             const verified = u.verified === true;
             const saving = savingUid === u.id;
 
@@ -3065,11 +2956,8 @@ function DeveloperPanel({ users, search, setSearch, savingUid, onVerify }) {
               <div className="developer-user" key={u.id}>
                 <Avatar profile={u} />
                 <div className="developer-user-info">
-                  <strong>
-                    {u.name || "Cheyyar Member"}
-                    {verified && <VerifiedBadge />}
-                  </strong>
-                  <span>@{u.username || "member"}</span>
+                  <UserName profile={u} />
+                  <UserHandle profile={u} />
                   {u.email && <small>{u.email}</small>}
                 </div>
 
@@ -3217,13 +3105,11 @@ function Post({
         />
 
         <div className="post-author">
-          <strong>
+          <UserName profile={authorProfile || { id: post.authorId, name: post.authorName, verified: authorVerified }}>
             {post.authorName}
-            {authorVerified && <VerifiedBadge />}
-          </strong>
-          <span>
-            @{post.authorUsername} · {timeAgo(post.createdAt)}
-          </span>
+          </UserName>
+          <UserHandle profile={authorProfile || { id: post.authorId, username: post.authorUsername, verified: authorVerified }} />
+          <span className="post-time">· {timeAgo(post.createdAt)}</span>
         </div>
 
         {isOwner && (
@@ -3330,12 +3216,10 @@ function Post({
               />
 
               <div>
-                <strong>
+                <UserName profile={users.find((u) => u.id === c.userId) || { id: c.userId, name: c.name }}>
                   {c.name}
-                  {users.find((u) => u.id === c.userId)?.verified === true && (
-                    <VerifiedBadge />
-                  )}
-                </strong>
+                </UserName>
+                <UserHandle profile={users.find((u) => u.id === c.userId) || { id: c.userId, username: c.username }} />
                 <p>{c.text}</p>
               </div>
             </div>
@@ -3439,8 +3323,8 @@ function Explore({
             <div className="user-card" key={u.id}>
               <Avatar profile={u} size="large" />
 
-              <strong>{u.name || "Cheyyar Member"}</strong>
-              <span>@{u.username || "member"}</span>
+              <UserName profile={u} />
+              <UserHandle profile={u} />
 
               <small>
                 📍 {u.area || "Cheyyar"}
@@ -3489,57 +3373,52 @@ function Explore({
    FEATURE PAGE
    ========================================================= */
 
-function UserProfileModal({
+function UserProfileView({
   target,
   currentUser,
   currentProfile,
+  targetPosts = [],
   isFollowing,
   onFollow,
   onMessage,
-  onClose,
+  onBack,
+  onLike,
+  onComment,
+  onOpenComments,
+  commentsOpen,
+  comments,
+  commentText,
+  setCommentText,
+  users = [],
 }) {
   const isSelf = target.id === currentUser.uid;
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="user-profile-modal">
-        <button className="modal-close" onClick={onClose}>
-          ×
-        </button>
+    <div className="profile-page user-profile-view">
 
-        <Avatar profile={target} size="profile" />
+      <button
+        type="button"
+        className="profile-view-back"
+        onClick={onBack}
+        aria-label="Back"
+      >
+        ← Back
+      </button>
 
-        <h2>
-          {target.name || "Cheyyar Member"}
-          {target.verified === true && <VerifiedBadge large />}
-        </h2>
-        <span className="handle">@{target.username || "member"}</span>
-
-        <p>{target.bio || "Connected with Cheyyar Hub."}</p>
-
-        <div className="profile-location">
-          📍 {target.area || "Cheyyar"}
-          {target.profession ? ` · ${target.profession}` : ""}
+      <div className="cover">
+        <div className="cover-pattern">
+          CHEYYAR • CHEYYAR • CHEYYAR
         </div>
+      </div>
 
-        <div className="stats">
-          <div>
-            <strong>{(target.followers || []).length}</strong>
-            <span>Followers</span>
-          </div>
-          <div>
-            <strong>{(target.following || []).length}</strong>
-            <span>Following</span>
-          </div>
+      <div className="profile-main">
+
+        <div className="profile-photo-wrap">
+          <Avatar profile={target} size="profile" />
         </div>
 
         {!isSelf && (
-          <div className="user-profile-actions">
+          <div className="profile-actions">
             <button
               className={isFollowing ? "following" : "primary"}
               onClick={() => onFollow(target)}
@@ -3555,7 +3434,76 @@ function UserProfileModal({
             </button>
           </div>
         )}
+
+        <h1 className="profile-display-name">
+          <UserName profile={target} />
+        </h1>
+
+        <UserHandle profile={target} className="handle" />
+
+        <p>{target.bio || "Connected with Cheyyar Hub."}</p>
+
+        <div className="profile-location">
+          📍 {target.area || "Cheyyar"}
+          {target.profession ? ` · ${target.profession}` : ""}
+        </div>
+
+        <div className="stats">
+          <div>
+            <strong>{targetPosts.length}</strong>
+            <span>Posts</span>
+          </div>
+          <div>
+            <strong>{(target.followers || []).length}</strong>
+            <span>Followers</span>
+          </div>
+          <div>
+            <strong>{(target.following || []).length}</strong>
+            <span>Following</span>
+          </div>
+        </div>
+
+        <div className="badges">
+          {(target.badges || []).map((b) => (
+            <span key={b}>{b}</span>
+          ))}
+        </div>
+
       </div>
+
+      <div className="profile-posts">
+
+        <h2>
+          {isSelf ? "Your Cheyyar Stories" : `${target.name || "Their"} Cheyyar Stories`}
+        </h2>
+
+        {targetPosts.map((p) => (
+          <Post
+            key={p.id}
+            post={p}
+            user={currentUser}
+            profile={currentProfile}
+            users={users}
+            onLike={onLike}
+            onComment={onComment}
+            onOpenComments={onOpenComments}
+            open={commentsOpen === p.id}
+            comments={comments[p.id] || []}
+            commentText={commentText}
+            setCommentText={setCommentText}
+          />
+        ))}
+
+        {!targetPosts.length && (
+          <Empty
+            icon="📝"
+            title="No stories yet"
+            text="Nothing shared with Cheyyar so far."
+          />
+        )}
+
+      </div>
+
     </div>
   );
 }
@@ -3837,7 +3785,7 @@ function CreatePage({
           <strong className="name-with-badge">
   {profile.name}
 
-  {user?.uid === DEVELOPER_UID ? (
+  {profile?.id === DEVELOPER_UID ? (
     <VerifiedBadge developer />
   ) : profile.verified ? (
     <VerifiedBadge />
@@ -3989,14 +3937,11 @@ function ProfilePage({
         </div>
 
 
-        <h1>
-          {profile.name}
-          {profile.verified === true && <VerifiedBadge large />}
+        <h1 className="profile-display-name">
+          <UserName profile={profile} />
         </h1>
 
-        <span className="handle">
-          @{profile.username}
-        </span>
+        <UserHandle profile={profile} className="handle" />
 
         <p>
           {profile.bio}
@@ -4361,6 +4306,7 @@ function Messages({
   loading,
   messageEndRef,
   currentUser,
+  onViewProfile,
 }) {
 
   const [chatSearch, setChatSearch] =
@@ -4451,15 +4397,8 @@ function Messages({
 
                   <div className="chat-user-info">
 
-                    <strong>
-                      {u.name ||
-                        "Cheyyar Member"}
-                    </strong>
-
-                    <span>
-                      @{u.username ||
-                        "member"}
-                    </span>
+                    <UserName profile={u} />
+                    <UserHandle profile={u} />
 
                   </div>
 
@@ -4517,24 +4456,25 @@ function Messages({
                   ←
                 </button>
 
-                <Avatar
-                  profile={selectedUser}
-                  size="small"
-                />
+                <button
+                  type="button"
+                  className="chat-header-identity"
+                  onClick={() => onViewProfile?.(selectedUser)}
+                >
 
-                <div className="chat-header-info">
+                  <Avatar
+                    profile={selectedUser}
+                    size="small"
+                  />
 
-                  <strong>
-                    {selectedUser.name ||
-                      "Cheyyar Member"}
-                  </strong>
+                  <div className="chat-header-info">
 
-                  <span>
-                    @{selectedUser.username ||
-                      "member"}
-                  </span>
+                    <UserName profile={selectedUser} />
+                    <UserHandle profile={selectedUser} />
 
-                </div>
+                  </div>
+
+                </button>
 
                 <div className="chat-header-actions">
 
@@ -4709,6 +4649,7 @@ function NotificationsPage({
   notifications,
   onRead,
   onNavigatePost,
+  users,
 }) {
 
   return (
@@ -4775,9 +4716,15 @@ function NotificationsPage({
 
               <div className="notification-content">
 
-                <strong>
-                  {notification.senderName}
-                </strong>
+                <UserName
+                  profile={{
+                    id: notification.senderId,
+                    name: notification.senderName,
+                    username: notification.senderUsername,
+                    photoURL: notification.senderPhotoURL,
+                    verified: (users || []).find((u) => u.id === notification.senderId)?.verified === true,
+                  }}
+                />
 
                 <p>
                   {notification.message}
