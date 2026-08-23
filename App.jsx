@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import logo from "./assets/logo.png";
 
 import { auth, db } from "./firebase";
 
@@ -100,13 +101,9 @@ function UserName({ profile, children, className = "" }) {
 }
 
 function UserHandle({ profile, className = "" }) {
-  const isDeveloper = profile?.id === DEVELOPER_UID;
-  const isVerified = !isDeveloper && profile?.verified === true;
-
   return (
     <span className={`identity-handle ${className}`.trim()}>
       @{profile?.username || "member"}
-      {isDeveloper ? <VerifiedBadge developer /> : isVerified ? <VerifiedBadge /> : null}
     </span>
   );
 }
@@ -1956,7 +1953,31 @@ function App() {
 
     return (
       <div className="loading-screen">
-        Loading Cheyyar Hub...
+
+        <div className="splash-glow" />
+
+        <div className="splash-logo-wrap">
+          <img
+            src={logo}
+            alt="Cheyyar Hub"
+            className="splash-logo"
+          />
+        </div>
+
+        <div className="splash-brand">
+          cheyyar<span>hub</span>
+        </div>
+
+        <p className="splash-tagline">
+          Our town. Our people. Our stories.
+        </p>
+
+        <div className="splash-loader">
+          <span />
+          <span />
+          <span />
+        </div>
+
       </div>
     );
   }
@@ -2389,6 +2410,36 @@ function App() {
 
         <section className="content">
 
+          {viewingUser ? (
+
+            <UserProfileView
+              target={viewingUser}
+              currentUser={user}
+              currentProfile={profile}
+              targetPosts={posts.filter(
+                (p) => p.authorId === viewingUser.id
+              )}
+              isFollowing={(profile.following || []).includes(viewingUser.id)}
+              onFollow={follow}
+              onMessage={(target) => {
+                setViewingUser(null);
+                openChat(target);
+                nav("messages");
+              }}
+              onBack={() => setViewingUser(null)}
+              onLike={toggleLike}
+              onComment={addComment}
+              onOpenComments={loadComments}
+              commentsOpen={commentsOpen}
+              comments={comments}
+              commentText={commentText}
+              setCommentText={setCommentText}
+              users={users}
+            />
+
+          ) : (
+            <>
+
           {/* HOME */}
 
           {page === "home" && (
@@ -2614,6 +2665,9 @@ function App() {
               notifications={
                 notifications
               }
+              users={
+                users
+              }
               onRead={
                 markNotificationRead
               }
@@ -2666,6 +2720,7 @@ function App() {
               currentUser={
                 user
               }
+              onViewProfile={(target) => setViewingUser(target)}
             />
           )}
 
@@ -2740,6 +2795,9 @@ function App() {
             />
           )}
 
+            </>
+          )}
+
         </section>
 
 
@@ -2797,22 +2855,6 @@ function App() {
 
       </main>
 
-
-      {viewingUser && (
-        <UserProfileModal
-          target={viewingUser}
-          currentUser={user}
-          currentProfile={profile}
-          isFollowing={(profile.following || []).includes(viewingUser.id)}
-          onFollow={follow}
-          onMessage={(target) => {
-            setViewingUser(null);
-            openChat(target);
-            nav("messages");
-          }}
-          onClose={() => setViewingUser(null)}
-        />
-      )}
 
       {founderOpen && (
         <FounderModal onClose={() => setFounderOpen(false)} />
@@ -3331,56 +3373,52 @@ function Explore({
    FEATURE PAGE
    ========================================================= */
 
-function UserProfileModal({
+function UserProfileView({
   target,
   currentUser,
   currentProfile,
+  targetPosts = [],
   isFollowing,
   onFollow,
   onMessage,
-  onClose,
+  onBack,
+  onLike,
+  onComment,
+  onOpenComments,
+  commentsOpen,
+  comments,
+  commentText,
+  setCommentText,
+  users = [],
 }) {
   const isSelf = target.id === currentUser.uid;
 
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="user-profile-modal">
-        <button className="modal-close" onClick={onClose}>
-          ×
-        </button>
+    <div className="profile-page user-profile-view">
 
-        <Avatar profile={target} size="profile" />
+      <button
+        type="button"
+        className="profile-view-back"
+        onClick={onBack}
+        aria-label="Back"
+      >
+        ← Back
+      </button>
 
-        <h2 className="profile-display-name">
-          <UserName profile={target} />
-        </h2>
-        <UserHandle profile={target} className="handle" />
-
-        <p>{target.bio || "Connected with Cheyyar Hub."}</p>
-
-        <div className="profile-location">
-          📍 {target.area || "Cheyyar"}
-          {target.profession ? ` · ${target.profession}` : ""}
+      <div className="cover">
+        <div className="cover-pattern">
+          CHEYYAR • CHEYYAR • CHEYYAR
         </div>
+      </div>
 
-        <div className="stats">
-          <div>
-            <strong>{(target.followers || []).length}</strong>
-            <span>Followers</span>
-          </div>
-          <div>
-            <strong>{(target.following || []).length}</strong>
-            <span>Following</span>
-          </div>
+      <div className="profile-main">
+
+        <div className="profile-photo-wrap">
+          <Avatar profile={target} size="profile" />
         </div>
 
         {!isSelf && (
-          <div className="user-profile-actions">
+          <div className="profile-actions">
             <button
               className={isFollowing ? "following" : "primary"}
               onClick={() => onFollow(target)}
@@ -3396,7 +3434,76 @@ function UserProfileModal({
             </button>
           </div>
         )}
+
+        <h1 className="profile-display-name">
+          <UserName profile={target} />
+        </h1>
+
+        <UserHandle profile={target} className="handle" />
+
+        <p>{target.bio || "Connected with Cheyyar Hub."}</p>
+
+        <div className="profile-location">
+          📍 {target.area || "Cheyyar"}
+          {target.profession ? ` · ${target.profession}` : ""}
+        </div>
+
+        <div className="stats">
+          <div>
+            <strong>{targetPosts.length}</strong>
+            <span>Posts</span>
+          </div>
+          <div>
+            <strong>{(target.followers || []).length}</strong>
+            <span>Followers</span>
+          </div>
+          <div>
+            <strong>{(target.following || []).length}</strong>
+            <span>Following</span>
+          </div>
+        </div>
+
+        <div className="badges">
+          {(target.badges || []).map((b) => (
+            <span key={b}>{b}</span>
+          ))}
+        </div>
+
       </div>
+
+      <div className="profile-posts">
+
+        <h2>
+          {isSelf ? "Your Cheyyar Stories" : `${target.name || "Their"} Cheyyar Stories`}
+        </h2>
+
+        {targetPosts.map((p) => (
+          <Post
+            key={p.id}
+            post={p}
+            user={currentUser}
+            profile={currentProfile}
+            users={users}
+            onLike={onLike}
+            onComment={onComment}
+            onOpenComments={onOpenComments}
+            open={commentsOpen === p.id}
+            comments={comments[p.id] || []}
+            commentText={commentText}
+            setCommentText={setCommentText}
+          />
+        ))}
+
+        {!targetPosts.length && (
+          <Empty
+            icon="📝"
+            title="No stories yet"
+            text="Nothing shared with Cheyyar so far."
+          />
+        )}
+
+      </div>
+
     </div>
   );
 }
@@ -3678,7 +3785,7 @@ function CreatePage({
           <strong className="name-with-badge">
   {profile.name}
 
-  {user?.uid === DEVELOPER_UID ? (
+  {profile?.id === DEVELOPER_UID ? (
     <VerifiedBadge developer />
   ) : profile.verified ? (
     <VerifiedBadge />
@@ -4199,6 +4306,7 @@ function Messages({
   loading,
   messageEndRef,
   currentUser,
+  onViewProfile,
 }) {
 
   const [chatSearch, setChatSearch] =
@@ -4348,17 +4456,25 @@ function Messages({
                   ←
                 </button>
 
-                <Avatar
-                  profile={selectedUser}
-                  size="small"
-                />
+                <button
+                  type="button"
+                  className="chat-header-identity"
+                  onClick={() => onViewProfile?.(selectedUser)}
+                >
 
-                <div className="chat-header-info">
+                  <Avatar
+                    profile={selectedUser}
+                    size="small"
+                  />
 
-                  <UserName profile={selectedUser} />
-                  <UserHandle profile={selectedUser} />
+                  <div className="chat-header-info">
 
-                </div>
+                    <UserName profile={selectedUser} />
+                    <UserHandle profile={selectedUser} />
+
+                  </div>
+
+                </button>
 
                 <div className="chat-header-actions">
 
@@ -4533,6 +4649,7 @@ function NotificationsPage({
   notifications,
   onRead,
   onNavigatePost,
+  users,
 }) {
 
   return (
@@ -4605,7 +4722,7 @@ function NotificationsPage({
                     name: notification.senderName,
                     username: notification.senderUsername,
                     photoURL: notification.senderPhotoURL,
-                    verified: users.find((u) => u.id === notification.senderId)?.verified === true,
+                    verified: (users || []).find((u) => u.id === notification.senderId)?.verified === true,
                   }}
                 />
 
