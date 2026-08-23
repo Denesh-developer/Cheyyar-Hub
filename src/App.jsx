@@ -49,7 +49,7 @@ const CLOUDINARY_UPLOAD_PRESET =
    DEFAULT PROFILE
    ========================================================= */
 
-const DEVELOPER_UID = "TtgTvNZ0XXRdem1B2bn1hXA4tzs2";
+const DEVELOPER_UID = "jOEPdQMoVsajzkIjiAeEnMoxqDf2";
 
 const EMAIL_FOR_SIGN_IN_KEY = "cheyyarhub_emailForSignIn";
 
