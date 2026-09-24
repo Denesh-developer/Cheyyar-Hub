@@ -1566,9 +1566,9 @@ function App() {
     try {
       if (Capacitor.isNativePlatform()) {
         const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
-        
-        // serverClientId explicitly initialize-la pass pannuvom
+
         await GoogleAuth.initialize({
+          serverClientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
           clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
           scopes: ["profile", "email"],
           grantOfflineAccess: true,
@@ -1578,38 +1578,41 @@ function App() {
           await GoogleAuth.signOut();
         } catch (_) {}
 
+        // 1. Native Google Sign-in
         const googleUser = await GoogleAuth.signIn();
         
         const idToken = googleUser?.authentication?.idToken || googleUser?.idToken;
+        
         if (!idToken) {
-          throw new Error("No idToken: " + JSON.stringify(googleUser));
+          alert("Step 1 Fail - No idToken: " + JSON.stringify(googleUser));
+          return;
         }
 
+        // 2. Firebase Exchange
         const credential = GoogleAuthProvider.credential(idToken);
         await signInWithCredential(auth, credential);
+        
       } else {
         await signInWithPopup(auth, googleProvider);
       }
     } catch (err) {
-      console.error("Google sign-in error:", err);
-      
-      // 👉 INTHA ORU VARI MATTUM ANGA POTHUNGA:
-      alert("Error Details: " + (err?.message || JSON.stringify(err)));
+      console.error("Google sign-in detailed error:", err);
 
-      const fullError = err?.message || JSON.stringify(err) || "Unknown error";
-      if (
-        !fullError.includes("cancelled") &&
-        !fullError.includes("popup-closed") &&
-        err.code !== "auth/popup-closed-by-user" &&
-        err.code !== "auth/cancelled-popup-request"
-      ) {
-        setAuthError(fullError);
-      }
+      // எல்லா properties-ஐயும் பிரித்து எடுக்கிறோம்
+      const deepError = {
+        message: err?.message,
+        code: err?.code,
+        name: err?.name,
+        stack: err?.stack,
+        raw: String(err)
+      };
+
+      alert("DETAILED ERROR:\n" + JSON.stringify(deepError, null, 2));
+      setAuthError(err?.message || "Google sign-in failed.");
     } finally {
       setGoogleSubmitting(false);
     }
   }
-
   /* =======================================================
      NOTIFICATION CREATOR
      ======================================================= */
