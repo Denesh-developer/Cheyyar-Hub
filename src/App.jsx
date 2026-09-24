@@ -1570,6 +1570,7 @@ function App() {
         await GoogleAuth.initialize({
           clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
           scopes: ["profile", "email"],
+          grantOfflineAccess:false,
         });
 
         try {
@@ -1595,8 +1596,15 @@ function App() {
       }
     } catch (err) {
       console.error("Google sign-in error:", err);
-      // Real technical error screen-la theriyum:
-      alert("Error Details: " + (err?.message || JSON.stringify(err)));
+      const msg = err?.message || "";
+      if (
+        !msg.includes("cancelled") &&
+        !msg.includes("popup-closed") &&
+        err.code !== "auth/popup-closed-by-user" &&
+        err.code !== "auth/cancelled-popup-request"
+      ) {
+        setAuthError(msg.replace("Firebase: ", "") || "Google sign-in failed.");
+      }
     } finally {
       setGoogleSubmitting(false);
     }
