@@ -1569,7 +1569,7 @@ function App() {
         
         // serverClientId explicitly initialize-la pass pannuvom
         await GoogleAuth.initialize({
-          clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com", // Unga Web Client ID
+          clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
           scopes: ["profile", "email"],
           grantOfflineAccess: true,
         });
