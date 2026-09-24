@@ -1566,9 +1566,14 @@ function App() {
     try {
       if (Capacitor.isNativePlatform()) {
         const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
-        await GoogleAuth.initialize();
+        
+        // serverClientId explicitly initialize-la pass pannuvom
+        await GoogleAuth.initialize({
+          clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com", // Unga Web Client ID
+          scopes: ["profile", "email"],
+          grantOfflineAccess: true,
+        });
 
-        // Pazhaya session lock aagi irunthaal release seiya
         try {
           await GoogleAuth.signOut();
         } catch (_) {}
@@ -1581,14 +1586,16 @@ function App() {
       }
     } catch (err) {
       console.error("Google sign-in error:", err);
-      const msg = err?.message || "";
+      // Actual error ennanu screen-la direct-aa kaatta:
+      const fullError = err?.message || JSON.stringify(err) || "Unknown error";
+      
       if (
-        !msg.includes("cancelled") &&
-        !msg.includes("popup-closed") &&
+        !fullError.includes("cancelled") &&
+        !fullError.includes("popup-closed") &&
         err.code !== "auth/popup-closed-by-user" &&
         err.code !== "auth/cancelled-popup-request"
       ) {
-        setAuthError(msg.replace("Firebase: ", "") || "Google sign-in failed.");
+        setAuthError(fullError);
       }
     } finally {
       setGoogleSubmitting(false);
