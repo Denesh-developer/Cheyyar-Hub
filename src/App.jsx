@@ -1579,7 +1579,13 @@ function App() {
         } catch (_) {}
 
         const googleUser = await GoogleAuth.signIn();
-        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
+        
+        const idToken = googleUser?.authentication?.idToken || googleUser?.idToken;
+        if (!idToken) {
+          throw new Error("No idToken: " + JSON.stringify(googleUser));
+        }
+
+        const credential = GoogleAuthProvider.credential(idToken);
         await signInWithCredential(auth, credential);
       } else {
         await signInWithPopup(auth, googleProvider);
