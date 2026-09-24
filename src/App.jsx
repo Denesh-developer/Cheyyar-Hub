@@ -3,7 +3,6 @@ import "./App.css";
 import logo from "./assets/logo.png";
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
-import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
 import { auth, db } from "./firebase";
 
 import {
@@ -304,15 +303,7 @@ async function uploadToCloudinary(file) {
 
   return data.secure_url;
 }
-/* =======================================================
-     GOOGLE AUTH INIT (Native Android)
-     ======================================================= */
 
-     useEffect(() => {
-      if (Capacitor.isNativePlatform()) {
-        GoogleAuth.initialize();
-      }
-    }, []);
 
 /* =========================================================
    STORIES & REELS - SETTINGS AND MEDIA HELPERS
@@ -1564,7 +1555,7 @@ function App() {
   async function signInWithGoogle() {
     setAuthError("");
 
-    // 1. Android Bridge இருந்தால்
+    // Android WebView Bridge check
     if (window.AndroidBridge && window.AndroidBridge.googleLogin) {
       setGoogleSubmitting(true);
       window.AndroidBridge.googleLogin();
@@ -1575,18 +1566,19 @@ function App() {
 
     try {
       if (Capacitor.isNativePlatform()) {
-        // 2. Android Mobile-ல் Native Bottom Sheet Account Chooser தோன்றும்
+        // Native platform-la mattum load aagum (Web-la crash aagathu)
+        const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
+        await GoogleAuth.initialize();
+        
         const googleUser = await GoogleAuth.signIn();
         const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
         await signInWithCredential(auth, credential);
       } else {
-        // 3. Web Browser-ல் Popup வழியாக இயங்கும்
+        // Browser / Vercel-la normal popup
         await signInWithPopup(auth, googleProvider);
       }
     } catch (err) {
       console.error("Google sign-in error:", err);
-
-      // பயனர் cancel செய்தால் பிழை காட்ட தேவையில்லை
       const msg = err?.message || "";
       if (
         !msg.includes("cancelled") &&
@@ -1600,7 +1592,6 @@ function App() {
       setGoogleSubmitting(false);
     }
   }
-
 
   /* =======================================================
      NOTIFICATION CREATOR
