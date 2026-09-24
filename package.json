@@ -1,20 +1,27 @@
 {
+  "name": "cheyyar-hub",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "preview": "vite preview",
+    "android": "npx cap open android",
+    "sync": "npx cap sync"
   },
   "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/push-notifications": "^6.0.5",
+    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
     "firebase": "^12.0.0",
-    "git": "^0.1.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.2.0",
-    "vite": "^7.0.0",
-    "wrangler": "^4.125.0"
-  },
-  "private": true
+    "vite": "^7.0.0"
+  }
 }

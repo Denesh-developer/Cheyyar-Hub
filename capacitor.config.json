@@ -1,0 +1,28 @@
+{
+  "appId": "com.cheyyarhub.app",
+  "appName": "CheyyarHub",
+  "webDir": "dist",
+  "server": {
+    "url": "https://cheyyar-hub.vercel.app",
+    "cleartext": false,
+    "allowNavigation": [
+      "cheyyar-hub.vercel.app",
+      "*.firebaseapp.com",
+      "*.googleapis.com",
+      "accounts.google.com",
+      "*.google.com"
+    ]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      "serverClientId": "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    }
+  }
+}

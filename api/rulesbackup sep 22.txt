@@ -1,0 +1,266 @@
+rules_version = '2';
+
+service cloud.firestore {
+match /databases/{database}/documents {
+
+/* =====================================================  
+   HELPER FUNCTIONS  
+   ===================================================== */  
+
+function isSignedIn() {  
+  return request.auth != null;  
+}  
+
+function isDeveloper() {  
+  return isSignedIn()  
+    && request.auth.uid == "vEIdznPIjVQiu70TwRjVKz8Dq0q2";  
+}  
+
+
+/* =====================================================  
+   USERS  
+   ===================================================== */  
+
+match /users/{userId} {  
+
+  // Signed-in users can read user profiles  
+  allow read: if isSignedIn();  
+
+
+  // User can create only their own profile  
+  allow create: if isSignedIn()  
+    && request.auth.uid == userId;  
+
+
+  // -----------------------------------------------------  
+  // DEVELOPER / FOUNDER VERIFICATION  
+  // -----------------------------------------------------  
+
+  allow update: if isDeveloper()  
+    && request.resource.data  
+      .diff(resource.data)  
+      .affectedKeys()  
+      .hasOnly([  
+        'verified',  
+        'verifiedAt',  
+        'verifiedBy'  
+      ]);  
+
+
+  // -----------------------------------------------------  
+  // FCM TOKEN  
+  // -----------------------------------------------------  
+  // Allows the logged-in user to add/update/remove  
+  // their own FCM token.  
+
+  allow update: if isSignedIn()  
+    && request.auth.uid == userId  
+    && request.resource.data  
+      .diff(resource.data)  
+      .affectedKeys()  
+      .hasOnly([  
+        'fcmTokens'  
+      ]);  
+
+
+  // -----------------------------------------------------  
+  // OWN PROFILE UPDATE  
+  // -----------------------------------------------------  
+  // User can update their own normal profile fields.  
+  // Protected fields cannot be changed here.  
+
+  allow update: if isSignedIn()  
+    && request.auth.uid == userId  
+    && !request.resource.data  
+      .diff(resource.data)  
+      .affectedKeys()  
+      .hasAny([  
+        'verified',  
+        'verifiedAt',  
+        'verifiedBy',  
+        'followers',  
+        'fcmTokens'  
+      ]);  
+
+
+  // -----------------------------------------------------  
+  // FOLLOW / UNFOLLOW  
+  // -----------------------------------------------------  
+
+  allow update: if isSignedIn()  
+    && request.resource.data  
+      .diff(resource.data)  
+      .affectedKeys()  
+      .hasOnly([  
+        'followers'  
+      ])  
+    && (  
+      (  
+        request.auth.uid in request.resource.data.followers  
+        && !(request.auth.uid in resource.data.followers)  
+      )  
+      ||  
+      (  
+        request.auth.uid in resource.data.followers  
+        && !(request.auth.uid in request.resource.data.followers)  
+      )  
+    );  
+
+
+  // User can delete own profile  
+  allow delete: if isSignedIn()  
+    && request.auth.uid == userId;  
+}  
+
+
+/* =====================================================  
+   POSTS  
+   ===================================================== */  
+
+match /posts/{postId} {  
+
+  // Signed-in users can read posts  
+  allow read: if isSignedIn();  
+
+
+  // Only authenticated user can create their own post  
+  allow create: if isSignedIn()  
+    && request.resource.data.authorId == request.auth.uid;  
+
+
+  // -----------------------------------------------------  
+  // POST UPDATE  
+  // -----------------------------------------------------  
+
+  allow update: if isSignedIn()  
+    && (  
+      (  
+        // Post owner can update normal post fields  
+        resource.data.authorId == request.auth.uid  
+        && !request.resource.data  
+          .diff(resource.data)  
+          .affectedKeys()  
+          .hasAny([  
+            'authorId',  
+            'likes',  
+            'likedBy',  
+            'saves',  
+            'savedBy',  
+            'shares',  
+            'commentCount'  
+          ])  
+      )  
+      ||  
+      (  
+        // Like / save / share / comment count updates  
+        request.resource.data  
+          .diff(resource.data)  
+          .affectedKeys()  
+          .hasOnly([  
+            'likes',  
+            'likedBy',  
+            'saves',  
+            'savedBy',  
+            'shares',  
+            'commentCount',  
+            'updatedAt'  
+          ])  
+      )  
+    );  
+
+
+  // Post owner can delete their post  
+  allow delete: if isSignedIn()  
+    && resource.data.authorId == request.auth.uid;  
+
+
+  /* ===================================================  
+     COMMENTS  
+     =================================================== */  
+
+  match /comments/{commentId} {  
+
+    // Signed-in users can read comments  
+    allow read: if isSignedIn();  
+
+
+    // User can create only their own comment  
+    allow create: if isSignedIn()  
+      && request.resource.data.userId == request.auth.uid;  
+
+
+    // User can update only their own comment  
+    allow update: if isSignedIn()  
+      && resource.data.userId == request.auth.uid  
+      && request.resource.data.userId == resource.data.userId;  
+
+
+    // User can delete only their own comment  
+    allow delete: if isSignedIn()  
+      && resource.data.userId == request.auth.uid;  
+  }  
+}  
+
+
+/* =====================================================  
+   NOTIFICATIONS  
+   ===================================================== */  
+
+match /notifications/{notificationId} {  
+
+  // Receiver can read/delete their notifications  
+  allow read, delete: if isSignedIn()  
+    && resource.data.receiverId == request.auth.uid;  
+
+
+  // User can create a notification for another user  
+  allow create: if isSignedIn()  
+    && request.resource.data.senderId == request.auth.uid  
+    && request.resource.data.receiverId != request.auth.uid;  
+
+
+  // Receiver can mark notification as read  
+  allow update: if isSignedIn()  
+    && resource.data.receiverId == request.auth.uid  
+    && request.resource.data  
+      .diff(resource.data)  
+      .affectedKeys()  
+      .hasOnly([  
+        'read',  
+        'isRead'  
+      ]);  
+}  
+
+
+/* =====================================================  
+   CHATS  
+   ===================================================== */  
+
+match /chats/{chatId} {  
+
+  // Authenticated users can read/write chat documents  
+  allow read, write: if isSignedIn();  
+
+
+  /* ===================================================  
+     CHAT MESSAGES  
+     =================================================== */  
+
+  match /messages/{messageId} {  
+
+    // Authenticated users can read/write messages  
+    allow read, write: if isSignedIn();  
+  }  
+}  
+
+
+/* =====================================================  
+   DEFAULT DENY  
+   ===================================================== */  
+
+match /{document=**} {  
+  allow read, write: if false;  
+}
+
+}
+}

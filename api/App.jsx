@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import logo from "./assets/logo.png";
-import { Capacitor } from "@capacitor/core";
-import { PushNotifications } from "@capacitor/push-notifications";
-import { GoogleAuth } from "@codetrix-studio/capacitor-google-auth";
+
 import { auth, db } from "./firebase";
 
 import {
@@ -12,8 +10,6 @@ import {
   updateProfile,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,   // 👈 ithai sethukonga
-  getRedirectResult,    // 👈 ithaiyum sethukonga
   signInWithCredential,
 } from "firebase/auth";
 
@@ -35,7 +31,6 @@ import {
   arrayRemove,
   writeBatch,
   getDocs,
-  Timestamp,
 } from "firebase/firestore";
 
 
@@ -126,7 +121,6 @@ function UserHandle({ profile, className = "" }) {
 
 const menu = [
   ["home", "🏠", "Home"],
-  ["reels", "🎬", "Reels"],
   ["trending", "🔥", "Trending"],
   ["explore", "📍", "Explore Cheyyar"],
   ["notifications", "🔔", "Notifications"],
@@ -304,144 +298,6 @@ async function uploadToCloudinary(file) {
 
   return data.secure_url;
 }
-/* =======================================================
-     GOOGLE AUTH INIT (Native Android)
-     ======================================================= */
-
-     useEffect(() => {
-      if (Capacitor.isNativePlatform()) {
-        GoogleAuth.initialize();
-      }
-    }, []);
-
-/* =========================================================
-   STORIES & REELS - SETTINGS AND MEDIA HELPERS
-   ========================================================= */
-
-const STORY_TTL_MS = 24 * 60 * 60 * 1000; // stories live for 24 hours
-const STORY_IMAGE_MS = 5000; // how long a photo story stays on screen
-const MAX_STORY_VIDEO_SEC = 30;
-const MAX_REEL_SEC = 60;
-const MAX_VIDEO_MB = 50;
-
-// true  = show stories from everyone in Cheyyar (good while the town is small)
-// false = only you + people you follow (Instagram style)
-const STORIES_FROM_EVERYONE = true;
-
-// Cloudinary delivery transformation for videos: smaller files + plays on
-// every phone (H.264 MP4). Set to "" to serve the original upload untouched.
-const CLD_VIDEO_TX = "q_auto,f_mp4,vc_h264";
-
-function uploadVideoToCloudinary(file, onProgress) {
-  return new Promise((resolve, reject) => {
-    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
-      reject(new Error("Cloudinary is not configured."));
-      return;
-    }
-
-    const xhr = new XMLHttpRequest();
-
-    xhr.open(
-      "POST",
-      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/video/upload`
-    );
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress?.(e.loaded / e.total);
-    };
-
-    xhr.onload = () => {
-      let data = {};
-
-      try {
-        data = JSON.parse(xhr.responseText);
-      } catch {
-        // ignore
-      }
-
-      if (xhr.status >= 200 && xhr.status < 300 && data.secure_url) {
-        resolve(data);
-      } else {
-        reject(new Error(data?.error?.message || "Video upload failed."));
-      }
-    };
-
-    xhr.onerror = () =>
-      reject(new Error("Network error while uploading the video."));
-
-    const form = new FormData();
-    form.append("file", file);
-    form.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-
-    xhr.send(form);
-  });
-}
-
-function cldVideoURL(url) {
-  if (!url || !CLD_VIDEO_TX || !url.includes("/video/upload/")) return url;
-  return url.replace("/video/upload/", `/video/upload/${CLD_VIDEO_TX}/`);
-}
-
-// First frame of a Cloudinary video as a small JPG.
-function cldPosterURL(url) {
-  if (!url || !url.includes("/video/upload/")) return "";
-
-  return url
-    .replace("/video/upload/", "/video/upload/so_0,w_540,f_jpg/")
-    .replace(/\.[a-z0-9]+(\?.*)?$/i, ".jpg");
-}
-
-function readVideoMeta(file) {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-
-    let finished = false;
-
-    const done = (value) => {
-      if (finished) return;
-      finished = true;
-      URL.revokeObjectURL(url);
-      video.removeAttribute("src");
-      video.load();
-      resolve(value);
-    };
-
-    video.preload = "metadata";
-    video.muted = true;
-
-    video.onloadedmetadata = () =>
-      done({
-        duration: video.duration,
-        width: video.videoWidth,
-        height: video.videoHeight,
-      });
-
-    video.onerror = () => done(null);
-
-    setTimeout(() => done(null), 8000);
-
-    video.src = url;
-  });
-}
-
-function formatCount(n = 0) {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
-  return String(n);
-}
-
-// Stops the page behind an overlay from scrolling.
-function useBodyLock() {
-  useEffect(() => {
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, []);
-}
 
 
 /* =========================================================
@@ -538,17 +394,6 @@ function App() {
   const [viewingUser, setViewingUser] = useState(null);
   const [highlightedPostId, setHighlightedPostId] = useState(null);
 
-  /* STORIES & REELS */
-
-  const [stories, setStories] = useState([]);
-  const [storyClock, setStoryClock] = useState(() => Date.now());
-  const [storyViewer, setStoryViewer] = useState(null);
-  const [storyComposerOpen, setStoryComposerOpen] = useState(false);
-  const [reelComposerOpen, setReelComposerOpen] = useState(false);
-  const [reelCommentsFor, setReelCommentsFor] = useState(null);
-  const [createChooserOpen, setCreateChooserOpen] = useState(false);
-  const viewedStoriesRef = useRef(new Set());
-
   useEffect(() => {
     return () => {
       Object.values(commentUnsubsRef.current).forEach((unsubscribe) => {
@@ -602,13 +447,6 @@ function App() {
   const [chatLoading, setChatLoading] =
     useState(false);
 
-  // Every chat doc the current user is part of, kept live so the Messages
-  // sidebar can show real conversations (with a last-message preview) and
-  // split them into "Messages" vs "Requests" like Instagram, instead of
-  // just listing every user in the app.
-  const [myChats, setMyChats] =
-    useState([]);
-
 
   /* UI */
 
@@ -619,40 +457,23 @@ function App() {
     useRef(null);
 
 
-/* =======================================================
+  /* =======================================================
      AUTH STATE
      ======================================================= */
 
-     useEffect(() => {
-      // 1. Android redirect login-ஆக இருந்தால் result-ஐ handle பண்ணும்
-      getRedirectResult(auth)
-        .then((result) => {
-          if (result?.user) {
-            setUser(result.user);
-          }
-        })
-        .catch((err) => {
-          console.error("Redirect login error:", err);
-          if (err.code !== "auth/credential-already-in-use") {
-            setAuthError(err.message?.replace("Firebase: ", "") || "Google sign-in failed.");
-          }
-        })
-        .finally(() => {
-          // Redirect check முடிந்தவுடன் loading-ஐ false பண்ணும்
-          setAuthLoading(false);
-        });
-  
-      // 2. Normal auth listener (Auto login / already logged in check)
-      const unsub = onAuthStateChanged(
-        auth,
-        (u) => {
-          setUser(u);
-          setAuthLoading(false);
-        }
-      );
-  
-      return () => unsub();
-    }, []);
+  useEffect(() => {
+
+    const unsub = onAuthStateChanged(
+      auth,
+      (u) => {
+        setUser(u);
+        setAuthLoading(false);
+      }
+    );
+
+    return unsub;
+
+  }, []);
 
 
   /* =======================================================
@@ -871,125 +692,6 @@ function App() {
 
 
   /* =======================================================
-     STORIES (24 hour)
-     ======================================================= */
-
-  useEffect(() => {
-
-    if (!user) return;
-
-    // Single-field filter, so no composite index is needed.
-    const q = query(
-      collection(db, "stories"),
-      where("expiresAt", ">", Timestamp.fromMillis(Date.now())),
-      limit(150)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setStories(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-      },
-      (error) => {
-        console.error("Stories listener:", error);
-      }
-    );
-
-    return unsub;
-
-  }, [user]);
-
-  // Tick once a minute so expired stories vanish without a refresh.
-  useEffect(() => {
-
-    const timer = setInterval(
-      () => setStoryClock(Date.now()),
-      60000
-    );
-
-    return () => clearInterval(timer);
-
-  }, []);
-
-  const storyGroups = useMemo(() => {
-
-    if (!user) return [];
-
-    const followingSet = new Set(profile.following || []);
-
-    const byAuthor = new Map();
-
-    stories.forEach((story) => {
-
-      const expires = story.expiresAt?.toMillis?.() ?? 0;
-
-      if (expires <= storyClock) return;
-
-      if (
-        !STORIES_FROM_EVERYONE &&
-        story.authorId !== user.uid &&
-        !followingSet.has(story.authorId)
-      ) {
-        return;
-      }
-
-      if (!byAuthor.has(story.authorId)) {
-        byAuthor.set(story.authorId, []);
-      }
-
-      byAuthor.get(story.authorId).push(story);
-    });
-
-    const millis = (s) =>
-      s.createdAt?.toMillis?.() ?? Date.now();
-
-    const groups = [];
-
-    byAuthor.forEach((list, authorId) => {
-
-      list.sort((a, b) => millis(a) - millis(b));
-
-      const author = users.find((u) => u.id === authorId);
-
-      groups.push({
-        authorId,
-        isOwn: authorId === user.uid,
-        isFollowing: followingSet.has(authorId),
-        author: {
-          id: authorId,
-          name: author?.name || list[0].authorName,
-          username: author?.username || list[0].authorUsername,
-          photoURL: author?.photoURL || list[0].authorPhotoURL || "",
-          verified: author?.verified === true,
-        },
-        stories: list,
-        latest: millis(list[list.length - 1]),
-        hasUnseen: list.some(
-          (s) => !(s.viewedBy || []).includes(user.uid)
-        ),
-      });
-    });
-
-    const rank = (g) => {
-      if (g.isOwn) return 0;
-      return (g.hasUnseen ? 1 : 3) + (g.isFollowing ? 0 : 1);
-    };
-
-    groups.sort(
-      (a, b) => rank(a) - rank(b) || b.latest - a.latest
-    );
-
-    return groups;
-
-  }, [stories, storyClock, users, profile.following, user]);
-
-
-  /* =======================================================
      NOTIFICATIONS
      ======================================================= */
 
@@ -1050,44 +752,6 @@ function App() {
     () => users.filter((u) => u.id !== user?.uid),
     [users, user]
   );
-
-
-  /* =======================================================
-     MY CHATS (for the Messages / Requests split)
-     ======================================================= */
-
-  useEffect(() => {
-
-    if (!user) {
-      setMyChats([]);
-      return;
-    }
-
-    const q = query(
-      collection(db, "chats"),
-      where("users", "array-contains", user.uid),
-      orderBy("updatedAt", "desc"),
-      limit(200)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setMyChats(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-      },
-      (error) => {
-        console.error("My chats:", error);
-      }
-    );
-
-    return unsub;
-
-  }, [user]);
 
 
   /* =======================================================
@@ -1236,21 +900,6 @@ function App() {
 
     const layers = [];
 
-    if (storyViewer)
-      layers.push(() => setStoryViewer(null));
-
-    if (storyComposerOpen)
-      layers.push(() => setStoryComposerOpen(false));
-
-    if (reelComposerOpen)
-      layers.push(() => setReelComposerOpen(false));
-
-    if (reelCommentsFor)
-      layers.push(() => setReelCommentsFor(null));
-
-    if (createChooserOpen)
-      layers.push(() => setCreateChooserOpen(false));
-
     if (editMode)
       layers.push(() => setEditMode(false));
 
@@ -1275,11 +924,6 @@ function App() {
     return layers;
 
   }, [
-    storyViewer,
-    storyComposerOpen,
-    reelComposerOpen,
-    reelCommentsFor,
-    createChooserOpen,
     editMode,
     editingPost,
     commentsOpen,
@@ -1500,104 +1144,71 @@ function App() {
   // AndroidBridge.getFcmToken() (already stored) or window.onFcmToken (when
   // Firebase hands it over a moment later).
   useEffect(() => {
+
     if (!user?.uid) return;
-    if (!Capacitor.isNativePlatform()) return;
 
-    const initPush = async () => {
-      try {
-        let permStatus = await PushNotifications.checkPermissions();
+    const save = (token) => {
+      if (!token) return;
 
-        if (permStatus.receive === "prompt") {
-          permStatus = await PushNotifications.requestPermissions();
-        }
-
-        if (permStatus.receive !== "granted") {
-          console.warn("Push notification permission denied");
-          return;
-        }
-
-        await PushNotifications.register();
-
-        // 1. FCM Token பதிவு செய்தல்
-        await PushNotifications.addListener("registration", async (token) => {
-          try {
-            await updateDoc(doc(db, "users", user.uid), {
-              fcmTokens: arrayUnion(token.value),
-            });
-          } catch (err) {
-            console.error("FCM Token save error:", err);
-          }
-        });
-
-        await PushNotifications.addListener("registrationError", (err) => {
-          console.error("Push registration error:", err);
-        });
-
-        // 2. App open-ல் (Foreground) இருக்கும் போது Notification வந்தால்
-        await PushNotifications.addListener("pushNotificationReceived", (notification) => {
-          setToast(`${notification.title || "Notification"}: ${notification.body || ""}`);
-        });
-
-        // 3. Notification-ஐ tap செய்யும் போது அந்த பக்கத்திற்கு navigate செய்தல்
-        await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-          const data = action.notification.data;
-          if (data?.postId) {
-            setHighlightedPostId(data.postId);
-            setPage("home");
-          } else if (data?.type === "message") {
-            setPage("messages");
-          }
-        });
-      } catch (err) {
-        console.error("Failed to setup push notifications:", err);
-      }
+      updateDoc(doc(db, "users", user.uid), {
+        fcmTokens: arrayUnion(token),
+      }).catch((e) => console.error("Save FCM token:", e));
     };
 
-    initPush();
+    try {
+      save(window.AndroidBridge?.getFcmToken?.());
+    } catch {
+      // older APK without getFcmToken
+    }
+
+    window.onFcmToken = save;
 
     return () => {
-      PushNotifications.removeAllListeners();
+      delete window.onFcmToken;
     };
+
   }, [user?.uid]);
 
 
   async function signInWithGoogle() {
+
     setAuthError("");
 
-    // 1. Android Bridge இருந்தால்
+    // Android app (WebView): native account chooser
     if (window.AndroidBridge && window.AndroidBridge.googleLogin) {
       setGoogleSubmitting(true);
       window.AndroidBridge.googleLogin();
       return;
     }
 
+    // Normal browser: popup
     setGoogleSubmitting(true);
 
     try {
-      if (Capacitor.isNativePlatform()) {
-        // 2. Android Mobile-ல் Native Bottom Sheet Account Chooser தோன்றும்
-        const googleUser = await GoogleAuth.signIn();
-        const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
-        await signInWithCredential(auth, credential);
-      } else {
-        // 3. Web Browser-ல் Popup வழியாக இயங்கும்
-        await signInWithPopup(auth, googleProvider);
-      }
-    } catch (err) {
-      console.error("Google sign-in error:", err);
 
-      // பயனர் cancel செய்தால் பிழை காட்ட தேவையில்லை
-      const msg = err?.message || "";
+      await signInWithPopup(auth, googleProvider);
+
+    } catch (err) {
+
+      console.error(err);
+
+      // A closed popup / duplicate click isn't a real error worth showing.
       if (
-        !msg.includes("cancelled") &&
-        !msg.includes("popup-closed") &&
-        err.code !== "auth/popup-closed-by-user" &&
-        err.code !== "auth/cancelled-popup-request"
+        err.code === "auth/popup-closed-by-user" ||
+        err.code === "auth/cancelled-popup-request"
       ) {
-        setAuthError(msg.replace("Firebase: ", "") || "Google sign-in failed.");
+        return;
       }
+
+      setAuthError(
+        err.message?.replace("Firebase: ", "") ||
+        "Google sign-in failed."
+      );
+
     } finally {
+
       setGoogleSubmitting(false);
+
     }
   }
 
@@ -2350,255 +1961,6 @@ function App() {
 
 
   /* =======================================================
-     STORIES
-     ======================================================= */
-
-  async function createStory({ file, kind, meta, caption }, onProgress) {
-
-    let mediaURL = "";
-    let poster = "";
-    let duration = 0;
-
-    if (kind === "video") {
-
-      const data = await uploadVideoToCloudinary(file, onProgress);
-
-      mediaURL = data.secure_url;
-      poster = cldPosterURL(mediaURL);
-      duration = Math.round(data.duration || meta?.duration || 0);
-
-    } else {
-
-      mediaURL = await uploadToCloudinary(file);
-
-    }
-
-    await addDoc(
-      collection(db, "stories"),
-      {
-        mediaURL,
-        mediaType: kind,
-        poster,
-        duration,
-        caption,
-
-        authorId: user.uid,
-        authorName: profile.name,
-        authorUsername: profile.username,
-        authorPhotoURL: profile.photoURL || "",
-
-        viewedBy: [],
-
-        createdAt: serverTimestamp(),
-        expiresAt: Timestamp.fromMillis(Date.now() + STORY_TTL_MS),
-      }
-    );
-
-    setToast("Added to your story");
-  }
-
-
-  function markStoryViewed(story) {
-
-    if (!story?.id || story.authorId === user.uid) return;
-
-    if (viewedStoriesRef.current.has(story.id)) return;
-
-    viewedStoriesRef.current.add(story.id);
-
-    if ((story.viewedBy || []).includes(user.uid)) return;
-
-    updateDoc(
-      doc(db, "stories", story.id),
-      { viewedBy: arrayUnion(user.uid) }
-    ).catch((error) => {
-      console.error("Story view:", error);
-    });
-  }
-
-
-  async function deleteStory(story) {
-
-    if (!story || story.authorId !== user.uid) return;
-
-    try {
-      await deleteDoc(doc(db, "stories", story.id));
-      setToast("Story deleted");
-    } catch (error) {
-      console.error("Delete story:", error);
-      setToast(error.message || "Could not delete story");
-    }
-  }
-
-
-  /* =======================================================
-     REELS
-     ======================================================= */
-
-  async function createReel({ file, meta, caption }, onProgress) {
-
-    const data = await uploadVideoToCloudinary(file, onProgress);
-
-    const width = data.width || meta?.width || 0;
-    const height = data.height || meta?.height || 0;
-
-    await addDoc(
-      collection(db, "reels"),
-      {
-        videoURL: data.secure_url,
-        poster: cldPosterURL(data.secure_url),
-        duration: Math.round(data.duration || meta?.duration || 0),
-        landscape: width > height,
-        caption,
-
-        authorId: user.uid,
-        authorName: profile.name,
-        authorUsername: profile.username,
-        authorPhotoURL: profile.photoURL || "",
-
-        likes: 0,
-        likedBy: [],
-        shares: 0,
-        commentCount: 0,
-
-        createdAt: serverTimestamp(),
-      }
-    );
-
-    setToast("Reel shared with Cheyyar 🎬");
-    setPage("reels");
-  }
-
-
-  async function toggleReelLike(reel) {
-
-    const liked = (reel.likedBy || []).includes(user.uid);
-
-    try {
-
-      await updateDoc(
-        doc(db, "reels", reel.id),
-        {
-          likes: increment(liked ? -1 : 1),
-          likedBy: liked
-            ? arrayRemove(user.uid)
-            : arrayUnion(user.uid),
-        }
-      );
-
-      if (!liked) {
-        await createNotification({
-          receiverId: reel.authorId,
-          type: "like",
-          message: `${profile.name} liked your reel.`,
-        });
-      }
-
-    } catch (error) {
-      console.error("Reel like:", error);
-      setToast(error.message || "Could not like reel");
-    }
-  }
-
-
-  async function addReelComment(reel, text) {
-
-    try {
-
-      const commentRef = doc(
-        collection(db, "reels", reel.id, "comments")
-      );
-
-      const batch = writeBatch(db);
-
-      batch.set(commentRef, {
-        userId: user.uid,
-        name: profile.name,
-        username: profile.username,
-        photoURL: profile.photoURL || "",
-        text,
-        createdAt: serverTimestamp(),
-      });
-
-      batch.update(
-        doc(db, "reels", reel.id),
-        { commentCount: increment(1) }
-      );
-
-      await batch.commit();
-
-      await createNotification({
-        receiverId: reel.authorId,
-        type: "comment",
-        message: `${profile.name} commented on your reel.`,
-      });
-
-    } catch (error) {
-      console.error("Reel comment:", error);
-      setToast(error.message || "Could not add comment");
-      throw error;
-    }
-  }
-
-
-  async function shareReel(reel) {
-
-    const text =
-      `${reel.authorName} on Cheyyar Hub: ${
-        reel.caption || "Watch this reel"
-      }`;
-
-    try {
-
-      if (navigator.share) {
-        await navigator.share({
-          title: "Cheyyar Hub",
-          text,
-          url: window.location.origin,
-        });
-      } else {
-        await navigator.clipboard.writeText(
-          `${text} ${window.location.origin}`
-        );
-        setToast("Link copied");
-      }
-
-      await updateDoc(
-        doc(db, "reels", reel.id),
-        { shares: increment(1) }
-      );
-
-    } catch (error) {
-      // Cancelling the share sheet throws; that is not an error.
-      if (error?.name !== "AbortError") {
-        console.log(error);
-      }
-    }
-  }
-
-
-  async function deleteReel(reel) {
-
-    if (!reel || reel.authorId !== user.uid) {
-      setToast("You can only manage your own reels");
-      return;
-    }
-
-    if (!window.confirm("Delete this reel? This cannot be undone.")) {
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(db, "reels", reel.id));
-      setToast("Reel deleted");
-    } catch (error) {
-      console.error("Delete reel:", error);
-      setToast(error.message || "Delete failed");
-    }
-  }
-
-
-  /* =======================================================
      CHAT ID
      ======================================================= */
 
@@ -2641,7 +2003,7 @@ function App() {
           users: [
             user.uid,
             target.id,
-          ].sort(),
+          ],
 
           userDetails: {
             [user.uid]: {
@@ -2732,7 +2094,7 @@ function App() {
           users: [
             user.uid,
             selectedChatUser.id,
-          ].sort(),
+          ],
 
           updatedAt:
             serverTimestamp(),
@@ -3147,9 +2509,7 @@ function App() {
     type="button"
     onClick={() => nav("developer")}
   >
-    <span className="dp-icon">👨‍💻</span>
-    <span className="dp-full"> Developer Panel</span>
-    <span className="dp-short">Dev</span>
+    👨‍💻 Developer Panel
   </button>
 )}
 
@@ -3216,20 +2576,20 @@ function App() {
   </button>
 
   <button
-    aria-label="Create"
+    aria-label="Create post"
     className="create-mobile"
-    onClick={() => setCreateChooserOpen(true)}
+    onClick={() => nav("create")}
   >
     ＋
   </button>
 
-  {/* Reels (notifications live in the top bar on mobile) */}
+  {/* Notifications */}
   <button
-    aria-label="Reels"
-    className={page === "reels" ? "active" : ""}
-    onClick={() => nav("reels")}
+    aria-label="Notifications"
+    className={page === "notifications" ? "active" : ""}
+    onClick={() => nav("notifications")}
   >
-    🎬
+    🔔
   </button>
 
   <button
@@ -3354,18 +2714,6 @@ function App() {
 
           {page === "home" && (
             <>
-
-              <StoriesBar
-                profile={profile}
-                groups={storyGroups}
-                onOpen={(index) =>
-                  setStoryViewer({
-                    groups: storyGroups,
-                    groupIndex: index,
-                  })
-                }
-                onAdd={() => setStoryComposerOpen(true)}
-              />
 
               <Hero
                 profile={profile}
@@ -3508,24 +2856,6 @@ function App() {
           )}
 
 
-          {/* REELS */}
-
-          {page === "reels" && (
-            <ReelsPage
-              user={user}
-              profile={profile}
-              users={users}
-              onLike={toggleReelLike}
-              onOpenComments={setReelCommentsFor}
-              onFollow={follow}
-              onShare={shareReel}
-              onDelete={deleteReel}
-              onCompose={() => setReelComposerOpen(true)}
-              onViewProfile={(target) => setViewingUser(target)}
-            />
-          )}
-
-
           {/* EVENTS */}
 
           {page === "events" && (
@@ -3634,7 +2964,6 @@ function App() {
           {page === "messages" && (
             <Messages
               users={chatUsers}
-              myChats={myChats}
               profile={profile}
               selectedUser={
                 selectedChatUser
@@ -3732,7 +3061,6 @@ function App() {
               onDelete={deletePost}
               onEdit={startEditPost}
               onLogout={logout}
-              onDeleteReel={deleteReel}
               users={users}
             />
           )}
@@ -3833,67 +3161,6 @@ function App() {
           saving={
             profileSaving
           }
-        />
-      )}
-
-
-      {/* STORIES & REELS OVERLAYS */}
-
-      {storyViewer && (
-        <StoryViewer
-          groups={storyViewer.groups}
-          startIndex={storyViewer.groupIndex}
-          user={user}
-          users={users}
-          liveStories={stories}
-          onClose={() => setStoryViewer(null)}
-          onView={markStoryViewed}
-          onDelete={deleteStory}
-        />
-      )}
-
-      {storyComposerOpen && (
-        <MediaComposer
-          mode="story"
-          onClose={() => setStoryComposerOpen(false)}
-          onSubmit={createStory}
-        />
-      )}
-
-      {reelComposerOpen && (
-        <MediaComposer
-          mode="reel"
-          onClose={() => setReelComposerOpen(false)}
-          onSubmit={createReel}
-        />
-      )}
-
-      {reelCommentsFor && (
-        <ReelCommentsSheet
-          reel={reelCommentsFor}
-          user={user}
-          profile={profile}
-          users={users}
-          onClose={() => setReelCommentsFor(null)}
-          onSubmit={addReelComment}
-        />
-      )}
-
-      {createChooserOpen && (
-        <CreateChooser
-          onClose={() => setCreateChooserOpen(false)}
-          onPost={() => {
-            setCreateChooserOpen(false);
-            nav("create");
-          }}
-          onStory={() => {
-            setCreateChooserOpen(false);
-            setStoryComposerOpen(true);
-          }}
-          onReel={() => {
-            setCreateChooserOpen(false);
-            setReelComposerOpen(true);
-          }}
         />
       )}
 
@@ -4477,8 +3744,6 @@ function UserProfileView({
 
       </div>
 
-      <ProfileReels uid={target.id} isOwner={false} />
-
       <div className="profile-posts">
 
         <h2>
@@ -4886,133 +4151,6 @@ function CreatePage({
 
 
 /* =========================================================
-   PROFILE REELS (grid + viewer)
-   ========================================================= */
-
-function ProfileReels({ uid, isOwner, onDelete }) {
-  const [reels, setReels] = useState([]);
-  const [activeId, setActiveId] = useState(null);
-
-  useEffect(() => {
-    if (!uid) return undefined;
-
-    // Single equality filter -> no composite index needed.
-    const q = query(
-      collection(db, "reels"),
-      where("authorId", "==", uid)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const list = snap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        }));
-
-        // Newest first (a just-created reel has no server time yet).
-        const time = (r) =>
-          r.createdAt?.seconds ?? Number.MAX_SAFE_INTEGER;
-
-        list.sort((a, b) => time(b) - time(a));
-        setReels(list);
-      },
-      (error) => {
-        console.error("Profile reels:", error);
-      }
-    );
-
-    return unsub;
-  }, [uid]);
-
-  const current = activeId
-    ? reels.find((r) => r.id === activeId)
-    : null;
-
-  if (!reels.length) return null;
-
-  return (
-    <div className="profile-reels">
-
-      <h2>
-        🎬 {isOwner ? "Your Reels" : "Reels"}{" "}
-        <span className="profile-reels-count">{reels.length}</span>
-      </h2>
-
-      <div className="profile-reels-grid">
-        {reels.map((r) => (
-          <button
-            key={r.id}
-            type="button"
-            className="profile-reel-tile"
-            onClick={() => setActiveId(r.id)}
-            aria-label="Play reel"
-          >
-            {r.poster ? (
-              <img src={r.poster} alt="" loading="lazy" />
-            ) : (
-              <video
-                src={cldVideoURL(r.videoURL)}
-                muted
-                playsInline
-                preload="metadata"
-              />
-            )}
-
-            <span className="profile-reel-play">▶</span>
-          </button>
-        ))}
-      </div>
-
-      {current && (
-        <div
-          className="profile-reel-viewer"
-          role="dialog"
-          aria-modal="true"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setActiveId(null);
-          }}
-        >
-          <button
-            type="button"
-            className="profile-reel-close"
-            onClick={() => setActiveId(null)}
-            aria-label="Close reel"
-          >
-            ✕
-          </button>
-
-          <video
-            src={cldVideoURL(current.videoURL)}
-            poster={current.poster || undefined}
-            controls
-            autoPlay
-            loop
-            playsInline
-          />
-
-          {current.caption && (
-            <p className="profile-reel-caption">{current.caption}</p>
-          )}
-
-          {isOwner && onDelete && (
-            <button
-              type="button"
-              className="profile-reel-delete"
-              onClick={() => onDelete(current)}
-            >
-              🗑 Delete reel
-            </button>
-          )}
-        </div>
-      )}
-
-    </div>
-  );
-}
-
-
-/* =========================================================
    PROFILE PAGE
    ========================================================= */
 
@@ -5031,7 +4169,6 @@ function ProfilePage({
   onDelete,
   onEdit,
   onLogout,
-  onDeleteReel,
   users = [],
 }) {
 
@@ -5166,13 +4303,6 @@ function ProfilePage({
         </button>
 
       </div>
-
-
-      <ProfileReels
-        uid={user?.uid}
-        isOwner
-        onDelete={onDeleteReel}
-      />
 
 
       <div className="profile-posts">
@@ -5439,7 +4569,6 @@ function ProfileEditModal({
 
 function Messages({
   users,
-  myChats = [],
   profile,
   selectedUser,
   setSelectedUser,
@@ -5456,86 +4585,8 @@ function Messages({
   const [chatSearch, setChatSearch] =
     useState("");
 
-  // "primary" = people you're connected to (you follow them or they follow
-  // you), "requests" = everyone else who's messaged you — same split as
-  // Instagram's Primary / Requests inbox, so strangers don't clutter the
-  // main list.
-  const [inboxTab, setInboxTab] =
-    useState("primary");
-
-  const myUid = currentUser?.uid;
-
-  const following = useMemo(
-    () => new Set(profile?.following || []),
-    [profile?.following]
-  );
-
-  const followers = useMemo(
-    () => new Set(profile?.followers || []),
-    [profile?.followers]
-  );
-
-  // Only people you actually have a chat thread with — not every member of
-  // Cheyyar Hub — enriched with the thread's last message so the sidebar
-  // can show a real inbox instead of a plain member directory.
-  const conversations = useMemo(() => {
-
-    const byPartner = new Map();
-
-    myChats.forEach((chat) => {
-
-      const partnerId =
-        (chat.users || []).find((id) => id !== myUid);
-
-      if (!partnerId) return;
-
-      const partner =
-        users.find((u) => u.id === partnerId);
-
-      if (!partner) return;
-
-      byPartner.set(partnerId, {
-        ...partner,
-        lastMessage: chat.lastMessage || "",
-        lastSenderId: chat.lastSenderId || "",
-        updatedAt: chat.updatedAt || null,
-      });
-
-    });
-
-    return Array.from(byPartner.values());
-
-  }, [myChats, users, myUid]);
-
-  const primaryConversations = useMemo(
-    () =>
-      conversations.filter(
-        (u) => following.has(u.id) || followers.has(u.id)
-      ),
-    [conversations, following, followers]
-  );
-
-  const requestConversations = useMemo(
-    () =>
-      conversations.filter(
-        (u) => !following.has(u.id) && !followers.has(u.id)
-      ),
-    [conversations, following, followers]
-  );
-
-  const searching = chatSearch.trim().length > 0;
-
-  // Searching looks across everyone in Cheyyar Hub, so you can still start
-  // a brand-new conversation. Otherwise the list is just the active tab's
-  // real conversations.
-  const baseList = searching
-    ? users
-    : inboxTab === "requests"
-      ? requestConversations
-      : primaryConversations;
-
   const visibleUsers =
-    baseList.filter((u) =>
+    users.filter((u) =>
       `${u.name || ""} ${
         u.username || ""
       }`
@@ -5599,43 +4650,6 @@ function Messages({
 
             </div>
 
-            {!searching && (
-
-              <div className="chat-tabs">
-
-                <button
-                  type="button"
-                  className={
-                    inboxTab === "primary"
-                      ? "chat-tab active"
-                      : "chat-tab"
-                  }
-                  onClick={() => setInboxTab("primary")}
-                >
-                  Messages
-                </button>
-
-                <button
-                  type="button"
-                  className={
-                    inboxTab === "requests"
-                      ? "chat-tab active"
-                      : "chat-tab"
-                  }
-                  onClick={() => setInboxTab("requests")}
-                >
-                  Requests
-                  {requestConversations.length > 0 && (
-                    <span className="chat-tab-badge">
-                      {requestConversations.length}
-                    </span>
-                  )}
-                </button>
-
-              </div>
-
-            )}
-
           </div>
 
 
@@ -5665,45 +4679,13 @@ function Messages({
                   <div className="chat-user-info">
 
                     <UserName profile={u} />
-
-                    {u.lastMessage ? (
-                      <span className="chat-user-preview">
-                        {u.lastSenderId === myUid ? "You: " : ""}
-                        {u.lastMessage}
-                      </span>
-                    ) : (
-                      <UserHandle profile={u} />
-                    )}
+                    <UserHandle profile={u} />
 
                   </div>
-
-                  {u.updatedAt && (
-                    <span className="chat-user-time">
-                      {timeAgo(u.updatedAt)}
-                    </span>
-                  )}
 
                 </button>
 
               )
-            )}
-
-            {!visibleUsers.length && searching && (
-              <div className="chat-empty-list">
-                No one matches “{chatSearch}”.
-              </div>
-            )}
-
-            {!visibleUsers.length && !searching && inboxTab === "primary" && (
-              <div className="chat-empty-list">
-                No conversations yet. Search someone to say hi.
-              </div>
-            )}
-
-            {!visibleUsers.length && !searching && inboxTab === "requests" && (
-              <div className="chat-empty-list">
-                No message requests right now.
-              </div>
             )}
 
           </div>
@@ -6139,1540 +5121,6 @@ function Empty({
       <p>
         {text}
       </p>
-
-    </div>
-  );
-}
-
-
-/* =========================================================
-   STORIES BAR
-   ========================================================= */
-
-function StoriesBar({ profile, groups, onOpen, onAdd }) {
-
-  const ownGroup = groups.find((g) => g.isOwn);
-
-  const ownState = !ownGroup
-    ? "none"
-    : ownGroup.hasUnseen
-      ? "unseen"
-      : "seen";
-
-  return (
-    <div className="sr-stories" aria-label="Stories">
-
-      <div className="sr-tile">
-
-        <button
-          type="button"
-          className="sr-tile-btn"
-          onClick={() =>
-            ownGroup ? onOpen(groups.indexOf(ownGroup)) : onAdd()
-          }
-        >
-          <span className={`sr-ring ${ownState}`}>
-            <Avatar profile={profile} />
-          </span>
-
-          <span className="sr-tile-name">Your story</span>
-        </button>
-
-        <button
-          type="button"
-          className="sr-plus"
-          onClick={onAdd}
-          aria-label="Add to your story"
-        >
-          ＋
-        </button>
-
-      </div>
-
-      {groups
-        .filter((g) => !g.isOwn)
-        .map((g) => (
-          <button
-            type="button"
-            key={g.authorId}
-            className="sr-tile sr-tile-btn"
-            onClick={() => onOpen(groups.indexOf(g))}
-          >
-            <span className={`sr-ring ${g.hasUnseen ? "unseen" : "seen"}`}>
-              <Avatar profile={g.author} />
-            </span>
-
-            <span className="sr-tile-name">
-              {g.author.username || g.author.name}
-            </span>
-          </button>
-        ))}
-
-    </div>
-  );
-}
-
-
-/* =========================================================
-   STORY VIEWER
-   ========================================================= */
-
-function firstUnseenIndex(group, uid) {
-  const i = (group?.stories || []).findIndex(
-    (s) => !(s.viewedBy || []).includes(uid)
-  );
-  return i === -1 ? 0 : i;
-}
-
-function StoryViewer({
-  groups,
-  startIndex,
-  user,
-  users,
-  liveStories,
-  onClose,
-  onView,
-  onDelete,
-}) {
-
-  const [gi, setGi] = useState(startIndex);
-
-  const [si, setSi] = useState(() =>
-    firstUnseenIndex(groups[startIndex], user.uid)
-  );
-
-  const [progress, setProgress] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const [readyId, setReadyId] = useState(null);
-  const [muted, setMuted] = useState(false);
-  const [dragY, setDragY] = useState(0);
-  const [viewersOpen, setViewersOpen] = useState(false);
-
-  const videoRef = useRef(null);
-  const progressRef = useRef(0);
-  const holdTimer = useRef(null);
-  const holdActive = useRef(false);
-  const pointer = useRef(null);
-  const nextRef = useRef(() => {});
-
-  useBodyLock();
-
-  const group = groups[gi];
-  const story = group?.stories[si];
-
-  const isOwn = group?.isOwn;
-  const isVideo = story?.mediaType === "video";
-
-  // Ready is tracked per story id, so a cached photo that loads before
-  // effects run can never leave the viewer stuck on the loading spinner.
-  const ready = Boolean(story) && readyId === story.id;
-
-  const liveStory =
-    liveStories.find((s) => s.id === story?.id) || story;
-
-
-  function goNext() {
-
-    if (!group) return;
-
-    if (si < group.stories.length - 1) {
-
-      setSi(si + 1);
-
-    } else if (gi < groups.length - 1) {
-
-      setGi(gi + 1);
-      setSi(firstUnseenIndex(groups[gi + 1], user.uid));
-
-    } else {
-
-      onClose();
-
-    }
-  }
-
-  function goPrev() {
-
-    if (si > 0) {
-
-      setSi(si - 1);
-
-    } else if (gi > 0) {
-
-      setGi(gi - 1);
-      setSi(0);
-
-    } else {
-
-      // First story of the first person: just restart it.
-      progressRef.current = 0;
-      setProgress(0);
-
-      if (videoRef.current) videoRef.current.currentTime = 0;
-    }
-  }
-
-  nextRef.current = goNext;
-
-
-  // A new story became current.
-  useEffect(() => {
-
-    if (!story) return;
-
-    progressRef.current = 0;
-    setProgress(0);
-    setViewersOpen(false);
-
-    onView(story);
-
-    // Warm up the next photo so it appears instantly.
-    const upcoming = group.stories[si + 1];
-
-    if (upcoming?.mediaType === "image") {
-      const img = new Image();
-      img.src = upcoming.mediaURL;
-    }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gi, si]);
-
-
-  // Progress bar. Photos run on a timer, videos follow the video clock.
-  useEffect(() => {
-
-    if (!story || paused || viewersOpen || !ready) return;
-
-    let raf;
-    let last = performance.now();
-
-    const tick = (now) => {
-
-      const dt = now - last;
-      last = now;
-
-      let p;
-
-      if (isVideo) {
-        const v = videoRef.current;
-        p = v && v.duration ? v.currentTime / v.duration : 0;
-      } else {
-        p = Math.min(1, progressRef.current + dt / STORY_IMAGE_MS);
-      }
-
-      if (Math.abs(p - progressRef.current) > 0.004 || p >= 1) {
-        progressRef.current = p;
-        setProgress(p);
-      }
-
-      if (!isVideo && p >= 1) {
-        nextRef.current();
-        return;
-      }
-
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-
-    return () => cancelAnimationFrame(raf);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gi, si, paused, viewersOpen, ready]);
-
-
-  // Video play / pause / mute.
-  useEffect(() => {
-
-    const v = videoRef.current;
-
-    if (!v || !ready) return;
-
-    if (paused || viewersOpen) {
-      v.pause();
-      return;
-    }
-
-    v.muted = muted;
-
-    const attempt = v.play();
-
-    if (attempt?.catch) {
-      attempt.catch(() => {
-        // Autoplay with sound was blocked: fall back to muted playback.
-        v.muted = true;
-        setMuted(true);
-        v.play().catch(() => {});
-      });
-    }
-
-  }, [ready, paused, viewersOpen, muted, gi, si]);
-
-
-  // Keyboard (desktop).
-  useEffect(() => {
-
-    const onKey = (e) => {
-      if (e.key === "ArrowRight") nextRef.current();
-      if (e.key === "ArrowLeft") goPrev();
-      if (e.key === "Escape") onClose();
-    };
-
-    window.addEventListener("keydown", onKey);
-
-    return () => window.removeEventListener("keydown", onKey);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gi, si]);
-
-
-  useEffect(() => () => clearTimeout(holdTimer.current), []);
-
-  useEffect(() => {
-    if (!story) onClose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [story]);
-
-
-  function onPointerDown(e) {
-
-    if (e.target.closest("[data-sr-ui]")) return;
-
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-
-    pointer.current = { x: e.clientX, y: e.clientY };
-    holdActive.current = false;
-
-    holdTimer.current = setTimeout(() => {
-      holdActive.current = true;
-      setPaused(true);
-    }, 180);
-  }
-
-  function onPointerMove(e) {
-
-    const start = pointer.current;
-
-    if (!start) return;
-
-    const dy = e.clientY - start.y;
-
-    if (dy > 8) {
-      clearTimeout(holdTimer.current);
-      setPaused(true);
-      setDragY(dy);
-    }
-  }
-
-  function onPointerUp(e) {
-
-    clearTimeout(holdTimer.current);
-
-    const start = pointer.current;
-
-    pointer.current = null;
-
-    if (!start) return;
-
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-
-    setDragY(0);
-
-    if (dy > 110 && Math.abs(dy) > Math.abs(dx)) {
-      onClose();
-      return;
-    }
-
-    const wasHold = holdActive.current;
-
-    holdActive.current = false;
-
-    setPaused(false);
-
-    if (wasHold) return;
-
-    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-
-      const rect = e.currentTarget.getBoundingClientRect();
-
-      if (e.clientX - rect.left < rect.width * 0.33) {
-        goPrev();
-      } else {
-        goNext();
-      }
-    }
-  }
-
-  function onPointerCancel() {
-
-    clearTimeout(holdTimer.current);
-
-    pointer.current = null;
-    holdActive.current = false;
-
-    setDragY(0);
-    setPaused(false);
-  }
-
-  async function removeStory() {
-
-    if (!window.confirm("Delete this story?")) return;
-
-    await onDelete(story);
-
-    onClose();
-  }
-
-
-  if (!story) return null;
-
-  const viewers = (liveStory.viewedBy || [])
-    .filter((id) => id !== user.uid)
-    .map((id) => users.find((u) => u.id === id))
-    .filter(Boolean);
-
-  const viewCount = (liveStory.viewedBy || []).filter(
-    (id) => id !== user.uid
-  ).length;
-
-  const dragScale = 1 - Math.min(dragY, 300) / 1500;
-
-  return (
-    <div
-      className="sr-overlay sr-viewer"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Story viewer"
-    >
-
-      <div
-        className="sr-frame"
-        style={
-          dragY
-            ? {
-                transform: `translateY(${dragY}px) scale(${dragScale})`,
-                opacity: 1 - Math.min(dragY, 300) / 600,
-                transition: "none",
-              }
-            : undefined
-        }
-      >
-
-        <div
-          className="sr-stage"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerCancel}
-        >
-
-          {isVideo ? (
-            <video
-              key={story.id}
-              ref={videoRef}
-              className="sr-media"
-              src={cldVideoURL(story.mediaURL)}
-              poster={story.poster || undefined}
-              playsInline
-              preload="auto"
-              onLoadedData={() => setReadyId(story.id)}
-              onEnded={() => nextRef.current()}
-              onError={() => nextRef.current()}
-            />
-          ) : (
-            <img
-              key={story.id}
-              className="sr-media"
-              src={story.mediaURL}
-              alt=""
-              draggable={false}
-              onLoad={() => setReadyId(story.id)}
-              onError={() => nextRef.current()}
-            />
-          )}
-
-          <div className="sr-scrim" />
-
-          <div className="sr-bars">
-            {group.stories.map((s, i) => (
-              <span className="sr-bar" key={s.id}>
-                <i
-                  style={{
-                    transform: `scaleX(${
-                      i < si ? 1 : i === si ? progress : 0
-                    })`,
-                  }}
-                />
-              </span>
-            ))}
-          </div>
-
-          <div className="sr-head" data-sr-ui>
-
-            <Avatar profile={group.author} size="small" />
-
-            <div className="sr-head-text">
-              <UserName profile={group.author} />
-              <span>{timeAgo(story.createdAt)}</span>
-            </div>
-
-            {isVideo && (
-              <button
-                type="button"
-                className="sr-icon-btn"
-                onClick={() => setMuted((m) => !m)}
-                aria-label={muted ? "Unmute" : "Mute"}
-              >
-                {muted ? "🔇" : "🔊"}
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="sr-icon-btn"
-              onClick={onClose}
-              aria-label="Close stories"
-            >
-              ✕
-            </button>
-
-          </div>
-
-          {story.caption && (
-            <div className="sr-caption">{story.caption}</div>
-          )}
-
-          {isOwn && (
-            <div className="sr-foot" data-sr-ui>
-
-              <button
-                type="button"
-                className="sr-foot-btn"
-                onClick={() => setViewersOpen(true)}
-              >
-                👁 {viewCount} {viewCount === 1 ? "view" : "views"}
-              </button>
-
-              <button
-                type="button"
-                className="sr-foot-btn danger"
-                onClick={removeStory}
-                aria-label="Delete story"
-              >
-                🗑️ Delete
-              </button>
-
-            </div>
-          )}
-
-          {!ready && (
-            <div className="sr-loading">
-              <span className="auth-spinner" aria-hidden="true" />
-            </div>
-          )}
-
-          {viewersOpen && (
-            <div className="sr-viewers" data-sr-ui>
-
-              <div className="sr-viewers-head">
-                <strong>Viewed by {viewCount}</strong>
-
-                <button
-                  type="button"
-                  className="sr-icon-btn"
-                  onClick={() => setViewersOpen(false)}
-                  aria-label="Close viewers"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="sr-viewers-list">
-                {viewers.map((v) => (
-                  <div className="sr-viewer-row" key={v.id}>
-                    <Avatar profile={v} size="small" />
-
-                    <div>
-                      <UserName profile={v} />
-                      <UserHandle profile={v} />
-                    </div>
-                  </div>
-                ))}
-
-                {!viewers.length && (
-                  <div className="sr-empty">
-                    No views yet. Check back soon.
-                  </div>
-                )}
-              </div>
-
-            </div>
-          )}
-
-        </div>
-
-        <button
-          type="button"
-          className="sr-arrow left"
-          onClick={goPrev}
-          aria-label="Previous story"
-        >
-          ‹
-        </button>
-
-        <button
-          type="button"
-          className="sr-arrow right"
-          onClick={goNext}
-          aria-label="Next story"
-        >
-          ›
-        </button>
-
-      </div>
-
-    </div>
-  );
-}
-
-
-/* =========================================================
-   MEDIA COMPOSER (story + reel)
-   ========================================================= */
-
-function MediaComposer({ mode, onClose, onSubmit }) {
-
-  const isReel = mode === "reel";
-
-  const [file, setFile] = useState(null);
-  const [kind, setKind] = useState("");
-  const [meta, setMeta] = useState(null);
-  const [preview, setPreview] = useState("");
-  const [caption, setCaption] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState("");
-
-  const inputRef = useRef(null);
-
-  useBodyLock();
-
-  useEffect(() => {
-    return () => {
-      if (preview) URL.revokeObjectURL(preview);
-    };
-  }, [preview]);
-
-  const maxSeconds = isReel ? MAX_REEL_SEC : MAX_STORY_VIDEO_SEC;
-
-  async function pickFile(e) {
-
-    const picked = e.target.files?.[0];
-
-    e.target.value = "";
-
-    if (!picked) return;
-
-    setError("");
-
-    const isVideo = picked.type.startsWith("video/");
-    const isImage = picked.type.startsWith("image/");
-
-    if (isReel && !isVideo) {
-      setError("Reels must be a video.");
-      return;
-    }
-
-    if (!isVideo && !isImage) {
-      setError("Choose a photo or a video.");
-      return;
-    }
-
-    if (isVideo && picked.size > MAX_VIDEO_MB * 1024 * 1024) {
-      setError(`That video is too big. Keep it under ${MAX_VIDEO_MB} MB.`);
-      return;
-    }
-
-    let info = null;
-
-    if (isVideo) {
-
-      info = await readVideoMeta(picked);
-
-      if (info && info.duration > maxSeconds + 0.5) {
-        setError(
-          `That video is ${Math.round(info.duration)}s. The limit is ${maxSeconds}s.`
-        );
-        return;
-      }
-    }
-
-    setFile(picked);
-    setKind(isVideo ? "video" : "image");
-    setMeta(info);
-    setPreview(URL.createObjectURL(picked));
-  }
-
-  async function submit() {
-
-    if (!file || busy) return;
-
-    setBusy(true);
-    setError("");
-    setProgress(0);
-
-    try {
-
-      await onSubmit(
-        { file, kind, meta, caption: caption.trim() },
-        setProgress
-      );
-
-      onClose();
-
-    } catch (err) {
-
-      console.error(err);
-
-      setError(err.message || "Upload failed. Try again.");
-      setBusy(false);
-
-    }
-  }
-
-  const pct = Math.round(progress * 100);
-
-  return (
-    <div className="sr-overlay sr-composer" role="dialog" aria-modal="true">
-
-      <div className="sr-sheet">
-
-        <div className="sr-sheet-head">
-
-          <button
-            type="button"
-            className="sr-icon-btn"
-            onClick={onClose}
-            disabled={busy}
-            aria-label="Close"
-          >
-            ✕
-          </button>
-
-          <strong>{isReel ? "New reel" : "New story"}</strong>
-
-          <button
-            type="button"
-            className="sr-share-btn"
-            onClick={submit}
-            disabled={!file || busy}
-          >
-            {busy ? (pct > 0 && pct < 100 ? `${pct}%` : "Sharing…") : "Share"}
-          </button>
-
-        </div>
-
-        <div className="sr-preview">
-
-          {!file ? (
-            <button
-              type="button"
-              className="sr-pick"
-              onClick={() => inputRef.current?.click()}
-            >
-              <span>{isReel ? "🎬" : "📸"}</span>
-              <b>{isReel ? "Choose a video" : "Choose a photo or video"}</b>
-              <small>
-                {isReel
-                  ? `Up to ${MAX_REEL_SEC} seconds. Vertical videos look best.`
-                  : `Disappears after 24 hours. Videos up to ${MAX_STORY_VIDEO_SEC} seconds.`}
-              </small>
-            </button>
-          ) : kind === "video" ? (
-            <video
-              src={preview}
-              className="sr-media"
-              autoPlay
-              muted
-              loop
-              playsInline
-              controls={false}
-            />
-          ) : (
-            <img src={preview} className="sr-media" alt="Story preview" />
-          )}
-
-          {file && !isReel && caption && (
-            <div className="sr-caption">{caption}</div>
-          )}
-
-          {busy && (
-            <div className="sr-upload">
-              <div className="sr-upload-bar">
-                <i style={{ width: `${Math.max(pct, 6)}%` }} />
-              </div>
-              <span>Please keep this screen open</span>
-            </div>
-          )}
-
-        </div>
-
-        <div className="sr-fields">
-
-          <textarea
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-            maxLength={isReel ? 200 : 120}
-            rows={2}
-            placeholder={isReel ? "Write a caption…" : "Add a caption…"}
-            disabled={busy}
-          />
-
-          {file && !busy && (
-            <button
-              type="button"
-              className="sr-link"
-              onClick={() => inputRef.current?.click()}
-            >
-              Choose a different {isReel ? "video" : "file"}
-            </button>
-          )}
-
-          {error && <div className="error">{error}</div>}
-
-        </div>
-
-        <input
-          ref={inputRef}
-          type="file"
-          hidden
-          accept={isReel ? "video/*" : "image/*,video/*"}
-          onChange={pickFile}
-        />
-
-      </div>
-
-    </div>
-  );
-}
-
-
-/* =========================================================
-   CREATE CHOOSER (mobile + button)
-   ========================================================= */
-
-function CreateChooser({ onClose, onPost, onStory, onReel }) {
-
-  return (
-    <div className="sr-overlay sr-chooser" onClick={onClose}>
-
-      <div
-        className="sr-chooser-sheet"
-        role="dialog"
-        aria-label="Create"
-        onClick={(e) => e.stopPropagation()}
-      >
-
-        <div className="sr-grabber" />
-
-        <button type="button" onClick={onPost}>
-          <span>📝</span>
-          <div>
-            <b>Post</b>
-            <small>Share text or a photo with the feed</small>
-          </div>
-        </button>
-
-        <button type="button" onClick={onStory}>
-          <span>⭕</span>
-          <div>
-            <b>Story</b>
-            <small>A photo or video that disappears in 24 hours</small>
-          </div>
-        </button>
-
-        <button type="button" onClick={onReel}>
-          <span>🎬</span>
-          <div>
-            <b>Reel</b>
-            <small>A short video up to {MAX_REEL_SEC} seconds</small>
-          </div>
-        </button>
-
-      </div>
-
-    </div>
-  );
-}
-
-
-/* =========================================================
-   REELS
-   ========================================================= */
-
-function ReelsPage({
-  user,
-  profile,
-  users,
-  onLike,
-  onOpenComments,
-  onFollow,
-  onShare,
-  onDelete,
-  onCompose,
-  onViewProfile,
-}) {
-
-  const [reels, setReels] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [active, setActive] = useState(0);
-  const [muted, setMuted] = useState(true);
-
-  const scrollerRef = useRef(null);
-
-  // Only listen while the Reels tab is open, to save Firestore reads.
-  useEffect(() => {
-
-    const q = query(
-      collection(db, "reels"),
-      orderBy("createdAt", "desc"),
-      limit(40)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setReels(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-        setLoaded(true);
-      },
-      (error) => {
-        console.error("Reels listener:", error);
-        setLoaded(true);
-      }
-    );
-
-    return unsub;
-
-  }, []);
-
-
-  // Whichever reel fills the screen becomes the active one.
-  useEffect(() => {
-
-    const root = scrollerRef.current;
-
-    if (!root) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
-            setActive(Number(entry.target.dataset.index));
-          }
-        });
-      },
-      { root, threshold: [0.6] }
-    );
-
-    root
-      .querySelectorAll("[data-index]")
-      .forEach((el) => observer.observe(el));
-
-    return () => observer.disconnect();
-
-  }, [reels.length]);
-
-
-  // Arrow keys on desktop.
-  useEffect(() => {
-
-    const onKey = (e) => {
-
-      const root = scrollerRef.current;
-
-      if (!root) return;
-
-      const tag = document.activeElement?.tagName;
-
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        root.scrollBy({
-          top: e.key === "ArrowDown" ? root.clientHeight : -root.clientHeight,
-          behavior: "smooth",
-        });
-      }
-    };
-
-    window.addEventListener("keydown", onKey);
-
-    return () => window.removeEventListener("keydown", onKey);
-
-  }, []);
-
-
-  return (
-    <div className="reels-page">
-
-      <button
-        type="button"
-        className="rl-compose"
-        onClick={onCompose}
-        aria-label="Create a reel"
-      >
-        ＋
-      </button>
-
-      {!loaded && (
-        <div className="rl-state">
-          <span className="auth-spinner" aria-hidden="true" />
-        </div>
-      )}
-
-      {loaded && !reels.length && (
-        <div className="rl-state">
-          <Empty
-            icon="🎬"
-            title="No reels yet"
-            text="Be the first to share a short video from Cheyyar."
-          />
-
-          <button
-            type="button"
-            className="primary"
-            onClick={onCompose}
-          >
-            Create a reel
-          </button>
-        </div>
-      )}
-
-      <div className="rl-scroller" ref={scrollerRef}>
-
-        {reels.map((reel, index) => (
-          <ReelCard
-            key={reel.id}
-            reel={reel}
-            index={index}
-            active={index === active}
-            near={Math.abs(index - active) <= 1}
-            muted={muted}
-            setMuted={setMuted}
-            user={user}
-            profile={profile}
-            users={users}
-            onLike={onLike}
-            onOpenComments={onOpenComments}
-            onFollow={onFollow}
-            onShare={onShare}
-            onDelete={onDelete}
-            onViewProfile={onViewProfile}
-          />
-        ))}
-
-      </div>
-
-    </div>
-  );
-}
-
-
-function ReelCard({
-  reel,
-  index,
-  active,
-  near,
-  muted,
-  setMuted,
-  user,
-  profile,
-  users,
-  onLike,
-  onOpenComments,
-  onFollow,
-  onShare,
-  onDelete,
-  onViewProfile,
-}) {
-
-  const videoRef = useRef(null);
-  const barRef = useRef(null);
-  const lastTap = useRef(0);
-  const tapTimer = useRef(null);
-
-  const [paused, setPaused] = useState(false);
-  const [buffering, setBuffering] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const [burst, setBurst] = useState(0);
-  const [expanded, setExpanded] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const liked = (reel.likedBy || []).includes(user.uid);
-  const isOwner = reel.authorId === user.uid;
-  const following = (profile.following || []).includes(reel.authorId);
-  const author = users.find((u) => u.id === reel.authorId);
-
-  const authorView = {
-    id: reel.authorId,
-    name: author?.name || reel.authorName,
-    username: author?.username || reel.authorUsername,
-    photoURL: author?.photoURL || reel.authorPhotoURL || "",
-    verified: author?.verified === true,
-  };
-
-
-  // Play only the reel on screen.
-  useEffect(() => {
-
-    const v = videoRef.current;
-
-    if (!v) return;
-
-    if (active && !paused) {
-
-      v.muted = muted;
-
-      const attempt = v.play();
-
-      if (attempt?.catch) {
-        attempt.catch(() => {
-          // Sound was blocked by the browser: play muted instead.
-          if (!v.muted) {
-            v.muted = true;
-            setMuted(true);
-            v.play().catch(() => {});
-          }
-        });
-      }
-
-    } else {
-
-      v.pause();
-
-    }
-
-  }, [active, paused, muted, near, failed]);
-
-
-  // Restart when you scroll away.
-  useEffect(() => {
-
-    if (active) return;
-
-    setPaused(false);
-    setMenuOpen(false);
-
-    const v = videoRef.current;
-
-    if (v) v.currentTime = 0;
-
-  }, [active]);
-
-
-  useEffect(() => {
-
-    if (!burst) return;
-
-    const timer = setTimeout(() => setBurst(0), 800);
-
-    return () => clearTimeout(timer);
-
-  }, [burst]);
-
-
-  useEffect(() => () => clearTimeout(tapTimer.current), []);
-
-
-  function onSurfaceClick() {
-
-    if (menuOpen) {
-      setMenuOpen(false);
-      return;
-    }
-
-    const now = Date.now();
-
-    if (now - lastTap.current < 300) {
-
-      // Double tap = like.
-      clearTimeout(tapTimer.current);
-      lastTap.current = 0;
-
-      if (!liked) onLike(reel);
-
-      setBurst(now);
-
-    } else {
-
-      lastTap.current = now;
-
-      tapTimer.current = setTimeout(
-        () => setPaused((p) => !p),
-        260
-      );
-
-    }
-  }
-
-  function onTimeUpdate() {
-
-    const v = videoRef.current;
-
-    if (v?.duration && barRef.current) {
-      barRef.current.style.width =
-        `${(v.currentTime / v.duration) * 100}%`;
-    }
-  }
-
-  function retry() {
-    setFailed(false);
-    setBuffering(true);
-  }
-
-
-  return (
-    <article
-      className="rl-card"
-      data-index={index}
-    >
-
-      {near && !failed ? (
-        <video
-          ref={videoRef}
-          className={`rl-video ${reel.landscape ? "contain" : ""}`}
-          src={cldVideoURL(reel.videoURL)}
-          poster={reel.poster || undefined}
-          loop
-          playsInline
-          muted
-          preload={active ? "auto" : "metadata"}
-          onTimeUpdate={onTimeUpdate}
-          onWaiting={() => setBuffering(true)}
-          onPlaying={() => setBuffering(false)}
-          onCanPlay={() => setBuffering(false)}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        reel.poster && (
-          <img className="rl-video" src={reel.poster} alt="" />
-        )
-      )}
-
-      <div className="rl-scrim" />
-
-      <div
-        className="rl-surface"
-        onClick={onSurfaceClick}
-        role="button"
-        tabIndex={0}
-        aria-label={paused ? "Play reel" : "Pause reel"}
-        onKeyDown={(e) => {
-          if (e.key === " " || e.key === "Enter") {
-            e.preventDefault();
-            setPaused((p) => !p);
-          }
-        }}
-      />
-
-      {paused && active && <div className="rl-paused">▶</div>}
-
-      {buffering && active && !failed && !paused && (
-        <div className="rl-buffer">
-          <span className="auth-spinner" aria-hidden="true" />
-        </div>
-      )}
-
-      {failed && (
-        <div className="rl-failed">
-          <p>Couldn't play this reel.</p>
-          <button type="button" onClick={retry}>
-            Try again
-          </button>
-        </div>
-      )}
-
-      {burst ? (
-        <span key={burst} className="rl-burst" aria-hidden="true">
-          ❤️
-        </span>
-      ) : null}
-
-      <button
-        type="button"
-        className="rl-mute"
-        onClick={() => setMuted(!muted)}
-        aria-label={muted ? "Unmute" : "Mute"}
-      >
-        {muted ? "🔇" : "🔊"}
-      </button>
-
-      <div className="rl-rail">
-
-        <button
-          type="button"
-          className={`rl-act ${liked ? "liked" : ""}`}
-          onClick={() => onLike(reel)}
-          aria-label={liked ? "Unlike" : "Like"}
-          aria-pressed={liked}
-        >
-          <span>{liked ? "❤️" : "🤍"}</span>
-          <b>{formatCount(reel.likes || 0)}</b>
-        </button>
-
-        <button
-          type="button"
-          className="rl-act"
-          onClick={() => onOpenComments(reel)}
-          aria-label="Open comments"
-        >
-          <span>💬</span>
-          <b>{formatCount(reel.commentCount || 0)}</b>
-        </button>
-
-        <button
-          type="button"
-          className="rl-act"
-          onClick={() => onShare(reel)}
-          aria-label="Share reel"
-        >
-          <span>↗️</span>
-          <b>Share</b>
-        </button>
-
-        {isOwner && (
-          <div className="rl-menu-wrap">
-
-            <button
-              type="button"
-              className="rl-act"
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Reel options"
-              aria-expanded={menuOpen}
-            >
-              <span>⋯</span>
-            </button>
-
-            {menuOpen && (
-              <div className="rl-menu">
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onDelete(reel);
-                  }}
-                >
-                  🗑️ Delete reel
-                </button>
-              </div>
-            )}
-
-          </div>
-        )}
-
-      </div>
-
-      <div className="rl-info">
-
-        <div className="rl-author">
-
-          <button
-            type="button"
-            className="rl-author-btn"
-            onClick={() => author && onViewProfile(author)}
-          >
-            <Avatar profile={authorView} size="small" />
-            <UserName profile={authorView} />
-          </button>
-
-          {!isOwner && !following && (
-            <button
-              type="button"
-              className="rl-follow"
-              onClick={() =>
-                onFollow(author || { id: reel.authorId, username: reel.authorUsername })
-              }
-            >
-              Follow
-            </button>
-          )}
-
-        </div>
-
-        {reel.caption && (
-          <p
-            className={`rl-caption ${expanded ? "open" : ""}`}
-            onClick={() => setExpanded((v) => !v)}
-          >
-            {reel.caption}
-          </p>
-        )}
-
-      </div>
-
-      <div className="rl-progress" aria-hidden="true">
-        <i ref={barRef} />
-      </div>
-
-    </article>
-  );
-}
-
-
-function ReelCommentsSheet({ reel, user, profile, users, onClose, onSubmit }) {
-
-  const [comments, setComments] = useState([]);
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-
-  useBodyLock();
-
-  useEffect(() => {
-
-    const q = query(
-      collection(db, "reels", reel.id, "comments"),
-      orderBy("createdAt", "asc"),
-      limit(100)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setComments(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-      },
-      (error) => {
-        console.error("Reel comments:", error);
-      }
-    );
-
-    return unsub;
-
-  }, [reel.id]);
-
-  async function send() {
-
-    const value = text.trim();
-
-    if (!value || sending) return;
-
-    setSending(true);
-
-    try {
-      await onSubmit(reel, value);
-      setText("");
-    } catch {
-      // onSubmit already showed the error toast
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="sr-overlay sr-comments" onClick={onClose}>
-
-      <div
-        className="sr-comments-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Comments"
-        onClick={(e) => e.stopPropagation()}
-      >
-
-        <div className="sr-grabber" />
-
-        <div className="sr-comments-head">
-          <strong>Comments</strong>
-
-          <button
-            type="button"
-            className="sr-icon-btn"
-            onClick={onClose}
-            aria-label="Close comments"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="sr-comments-list">
-
-          {comments.map((c) => {
-
-            const commenter = users.find((u) => u.id === c.userId);
-
-            const view = {
-              id: c.userId,
-              name: commenter?.name || c.name,
-              username: commenter?.username || c.username,
-              photoURL: commenter?.photoURL || c.photoURL || "",
-              verified: commenter?.verified === true,
-            };
-
-            return (
-              <div className="sr-comment" key={c.id}>
-
-                <Avatar profile={view} size="small" />
-
-                <div>
-                  <div className="sr-comment-meta">
-                    <UserName profile={view} />
-                    <span>{timeAgo(c.createdAt)}</span>
-                  </div>
-
-                  <p>{c.text}</p>
-                </div>
-
-              </div>
-            );
-          })}
-
-          {!comments.length && (
-            <div className="sr-empty">
-              No comments yet. Start the conversation.
-            </div>
-          )}
-
-        </div>
-
-        <div className="sr-comment-compose">
-
-          <Avatar profile={profile} size="small" />
-
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            placeholder="Add a comment…"
-            maxLength={300}
-          />
-
-          <button
-            type="button"
-            onClick={send}
-            disabled={!text.trim() || sending}
-          >
-            Post
-          </button>
-
-        </div>
-
-      </div>
 
     </div>
   );

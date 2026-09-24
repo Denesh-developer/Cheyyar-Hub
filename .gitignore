@@ -33,3 +33,30 @@ serviceAccountKey.json
 **/serviceAccountKey.json
 .env
 .env.*
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Android (regenerate as needed)
+android/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Capacitor
+.capacitor/
