@@ -1592,9 +1592,11 @@ function App() {
       }
     } catch (err) {
       console.error("Google sign-in error:", err);
-      // Actual error ennanu screen-la direct-aa kaatta:
-      const fullError = err?.message || JSON.stringify(err) || "Unknown error";
       
+      // 👉 INTHA ORU VARI MATTUM ANGA POTHUNGA:
+      alert("Error Details: " + (err?.message || JSON.stringify(err)));
+
+      const fullError = err?.message || JSON.stringify(err) || "Unknown error";
       if (
         !fullError.includes("cancelled") &&
         !fullError.includes("popup-closed") &&
