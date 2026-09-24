@@ -1595,17 +1595,8 @@ function App() {
       }
     } catch (err) {
       console.error("Google sign-in error:", err);
-      
-      const msg = err?.message || "";
-      // பயனர் தானாக cancel செய்தால் எந்த error-ம் காட்டாமல் அமைதியாக இருக்க:
-      if (
-        !msg.includes("cancelled") &&
-        !msg.includes("popup-closed") &&
-        err.code !== "auth/popup-closed-by-user" &&
-        err.code !== "auth/cancelled-popup-request"
-      ) {
-        setAuthError(msg.replace("Firebase: ", "") || "Google sign-in failed.");
-      }
+      // Real technical error screen-la theriyum:
+      alert("Error Details: " + (err?.message || JSON.stringify(err)));
     } finally {
       setGoogleSubmitting(false);
     }
