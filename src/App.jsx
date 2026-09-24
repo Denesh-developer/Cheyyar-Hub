@@ -1567,7 +1567,7 @@ function App() {
       if (Capacitor.isNativePlatform()) {
         const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
 
-        aawait GoogleAuth.initialize({
+        await GoogleAuth.initialize({
           clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
           scopes: ["profile", "email"],
         });
@@ -1594,19 +1594,18 @@ function App() {
         await signInWithPopup(auth, googleProvider);
       }
     } catch (err) {
-      console.error("Google sign-in detailed error:", err);
-
-      // எல்லா properties-ஐயும் பிரித்து எடுக்கிறோம்
-      const deepError = {
-        message: err?.message,
-        code: err?.code,
-        name: err?.name,
-        stack: err?.stack,
-        raw: String(err)
-      };
-
-      alert("DETAILED ERROR:\n" + JSON.stringify(deepError, null, 2));
-      setAuthError(err?.message || "Google sign-in failed.");
+      console.error("Google sign-in error:", err);
+      
+      const msg = err?.message || "";
+      // பயனர் தானாக cancel செய்தால் எந்த error-ம் காட்டாமல் அமைதியாக இருக்க:
+      if (
+        !msg.includes("cancelled") &&
+        !msg.includes("popup-closed") &&
+        err.code !== "auth/popup-closed-by-user" &&
+        err.code !== "auth/cancelled-popup-request"
+      ) {
+        setAuthError(msg.replace("Firebase: ", "") || "Google sign-in failed.");
+      }
     } finally {
       setGoogleSubmitting(false);
     }
