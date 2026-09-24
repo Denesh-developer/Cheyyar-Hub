@@ -1567,11 +1567,9 @@ function App() {
       if (Capacitor.isNativePlatform()) {
         const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
 
-        await GoogleAuth.initialize({
-          serverClientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
+        aawait GoogleAuth.initialize({
           clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
           scopes: ["profile", "email"],
-          grantOfflineAccess: true,
         });
 
         try {
