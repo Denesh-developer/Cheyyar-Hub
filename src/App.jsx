@@ -1555,7 +1555,6 @@ function App() {
   async function signInWithGoogle() {
     setAuthError("");
 
-    // Android WebView Bridge check
     if (window.AndroidBridge && window.AndroidBridge.googleLogin) {
       setGoogleSubmitting(true);
       window.AndroidBridge.googleLogin();
@@ -1566,15 +1565,18 @@ function App() {
 
     try {
       if (Capacitor.isNativePlatform()) {
-        // Native platform-la mattum load aagum (Web-la crash aagathu)
         const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
         await GoogleAuth.initialize();
-        
+
+        // Pazhaya session lock aagi irunthaal release seiya
+        try {
+          await GoogleAuth.signOut();
+        } catch (_) {}
+
         const googleUser = await GoogleAuth.signIn();
         const credential = GoogleAuthProvider.credential(googleUser.authentication.idToken);
         await signInWithCredential(auth, credential);
       } else {
-        // Browser / Vercel-la normal popup
         await signInWithPopup(auth, googleProvider);
       }
     } catch (err) {
@@ -2835,6 +2837,14 @@ function App() {
       // ignore
     }
 
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { GoogleAuth } = await import("@codetrix-studio/capacitor-google-auth");
+        await GoogleAuth.signOut();
+      } catch (e) {
+        console.log("Google session clear error:", e);
+      }
+    }
     await signOut(auth);
 
     setSelectedChatUser(null);
