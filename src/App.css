@@ -7800,3 +7800,41 @@ video {
   color: rgba(255, 255, 255, 0.4);
   font-size: 11px;
 }
+.notification-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.notif-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+
+.notif-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.notif-accept-btn {
+  background: var(--primary, #ff5c35);
+  color: #fff;
+}
+
+.notif-delete-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  color: var(--text-soft, #a9aeba);
+}
+
+.notif-delete-btn:hover {
+  background: rgba(255, 77, 103, 0.15);
+  color: #ff8d9c;
+  border-color: rgba(255, 77, 103, 0.3);
+}
