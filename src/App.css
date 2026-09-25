@@ -7605,3 +7605,236 @@ video {
   -webkit-user-drag: none;
   -webkit-touch-callout: none;
 }
+
+/* =========================================================
+   PRIVATE ACCOUNT / FOLLOW REQUESTS / MESSAGE REQUESTS
+   (added for: private+public account toggle, follow-request
+   accept flow, message-request accept flow, split unread dots)
+   ========================================================= */
+
+/* ---- Private account toggle (edit profile) ---- */
+
+.privacy-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.privacy-toggle-row strong {
+  display: block;
+  font-size: 14px;
+}
+
+.privacy-toggle-row small {
+  display: block;
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.privacy-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.privacy-switch span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.privacy-switch.on {
+  background: linear-gradient(180deg, var(--primary), var(--primary-2));
+  border-color: transparent;
+}
+
+.privacy-switch.on span {
+  transform: translateX(20px);
+}
+
+/* ---- Locked (private) profile view ---- */
+
+.private-account-card {
+  margin: 18px;
+  padding: 34px 20px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.private-account-icon {
+  font-size: 30px;
+  margin-bottom: 10px;
+}
+
+.private-account-card h3 {
+  margin: 0 0 6px;
+}
+
+.private-account-card p {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  max-width: 320px;
+  margin: 0 auto;
+}
+
+/* ---- Messages tab unread dots ---- */
+
+.chat-tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+}
+
+.chat-user {
+  position: relative;
+}
+
+.chat-user.unread .chat-user-info .identity-name,
+.chat-user.unread .chat-user-preview {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.chat-unread-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+/* ---- Message request bar (accept / delete) ---- */
+
+.chat-request-bar {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-request-bar p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.5;
+}
+
+.chat-request-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-request-accept,
+.chat-request-delete {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 13px;
+  border: 1px solid var(--border);
+}
+
+.chat-request-accept {
+  background: linear-gradient(180deg, var(--primary), var(--primary-2));
+  color: white;
+  border-color: transparent;
+}
+
+.chat-request-delete {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ---- Follow-request actions inside a notification row ---- */
+
+.notification-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.notification-accept,
+.notification-decline {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+}
+
+.notification-accept {
+  background: linear-gradient(180deg, var(--primary), var(--primary-2));
+  color: white;
+  border-color: transparent;
+}
+
+.notification-decline {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.notification-handled {
+  display: block;
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+}
+.notification-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.notif-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+
+.notif-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.notif-accept-btn {
+  background: var(--primary, #ff5c35);
+  color: #fff;
+}
+
+.notif-delete-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  color: var(--text-soft, #a9aeba);
+}
+
+.notif-delete-btn:hover {
+  background: rgba(255, 77, 103, 0.15);
+  color: #ff8d9c;
+  border-color: rgba(255, 77, 103, 0.3);
+}

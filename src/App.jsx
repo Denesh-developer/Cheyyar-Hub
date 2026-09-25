@@ -72,7 +72,23 @@ const DEFAULT_PROFILE = {
   following: [],
   badges: ["🌱 New Member"],
   verified: false,
+  isPrivate: false,
 };
+
+
+/* A chat is a "message request" for me when someone I have no connection
+   with started it and I have not accepted it yet. Replying (or accepting)
+   adds me to chat.acceptedBy. */
+function isMessageRequest(chat, myUid, following, followers) {
+  const partnerId = (chat.users || []).find((id) => id !== myUid);
+
+  if (!partnerId) return false;
+  if ((chat.acceptedBy || []).includes(myUid)) return false;
+  if (chat.lastSenderId === myUid) return false;
+  if (following.has(partnerId) || followers.has(partnerId)) return false;
+
+  return true;
+}
 
 
 function VerifiedBadge({ developer = false, large = false }) {
@@ -609,6 +625,14 @@ function App() {
   const messageEndRef =
     useRef(null);
 
+  // Guards the Follow button against rapid double-clicks / re-renders
+  // firing follow() again before the outgoingFollowRequests / following
+  // state has caught up — without this, each extra click was creating
+  // a brand-new (duplicate) notification even though the underlying
+  // follow/request doc itself stayed a single, deduped document.
+  const followInFlightRef =
+    useRef(new Set());
+
 
 /* =======================================================
      AUTH STATE
@@ -1082,6 +1106,133 @@ function App() {
 
 
   /* =======================================================
+     FOLLOW REQUESTS (private accounts)
+     ======================================================= */
+
+  const [outgoingFollowRequests, setOutgoingFollowRequests] =
+    useState([]);
+
+  const [incomingFollowRequests, setIncomingFollowRequests] =
+    useState([]);
+
+  // Guards against re-running the "complete the follow" batch twice while
+  // Firestore is still catching up to our own delete of the request doc.
+  const processingApprovalsRef = useRef(new Set());
+
+  // A private account approves your request by flipping its status to
+  // "approved" (that's all the *target* is allowed to write). Finishing
+  // the actual follow — adding you to their followers, them to your
+  // following — has to be done by you (the requester), same as any
+  // normal follow, because that's what the security rules allow.
+  async function completeApprovedFollow(reqDoc) {
+
+    if (processingApprovalsRef.current.has(reqDoc.id)) return;
+    processingApprovalsRef.current.add(reqDoc.id);
+
+    try {
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, "users", user.uid), {
+        following: arrayUnion(reqDoc.targetId),
+      });
+
+      batch.update(doc(db, "users", reqDoc.targetId), {
+        followers: arrayUnion(user.uid),
+      });
+
+      await batch.commit();
+
+      await deleteDoc(doc(db, "followRequests", reqDoc.id));
+    } catch (error) {
+      console.error("Complete approved follow:", error);
+      processingApprovalsRef.current.delete(reqDoc.id);
+    }
+  }
+
+  useEffect(() => {
+
+    if (!user) {
+      setOutgoingFollowRequests([]);
+      setIncomingFollowRequests([]);
+      return;
+    }
+
+    const unsubOut = onSnapshot(
+      query(
+        collection(db, "followRequests"),
+        where("requesterId", "==", user.uid)
+      ),
+      (snap) => {
+
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        setOutgoingFollowRequests(
+          docs
+            .filter((d) => d.status !== "approved")
+            .map((d) => d.targetId)
+        );
+
+        docs
+          .filter((d) => d.status === "approved")
+          .forEach((d) => completeApprovedFollow(d));
+
+      },
+      (error) => console.error("Outgoing follow requests:", error)
+    );
+
+    const unsubIn = onSnapshot(
+      query(
+        collection(db, "followRequests"),
+        where("targetId", "==", user.uid)
+      ),
+      (snap) =>
+        setIncomingFollowRequests(
+          snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        ),
+      (error) => console.error("Incoming follow requests:", error)
+    );
+
+    return () => {
+      unsubOut();
+      unsubIn();
+    };
+
+  }, [user]);
+
+
+  /* =======================================================
+     UNREAD DOTS + MESSAGE REQUEST STATE
+     ======================================================= */
+
+  // Bell dot = everything except messages. Messages get their own dot.
+  const bellUnread = notifications.some(
+    (n) => !n.read && n.type !== "message"
+  );
+
+  const messagesUnread = myChats.some(
+    (c) => c.lastMessage && (c.unreadBy || []).includes(user?.uid)
+  );
+
+  const selectedChatIsRequest = useMemo(() => {
+
+    if (!user || !selectedChatUser) return false;
+
+    const chatId = [user.uid, selectedChatUser.id].sort().join("_");
+    const chat = myChats.find((c) => c.id === chatId);
+
+    if (!chat || !chat.lastMessage) return false;
+
+    return isMessageRequest(
+      chat,
+      user.uid,
+      new Set(profile?.following || []),
+      new Set(profile?.followers || [])
+    );
+
+  }, [user, selectedChatUser, myChats, profile?.following, profile?.followers]);
+
+
+  /* =======================================================
      CHAT MESSAGES
      ======================================================= */
 
@@ -1132,7 +1283,11 @@ function App() {
             d.data()?.read === false
         );
 
-        if (unread.length) {
+        if (unread.length && !selectedChatIsRequest) {
+          updateDoc(doc(db, "chats", chatId), {
+            unreadBy: arrayRemove(user.uid),
+          }).catch(() => {});
+
           Promise.all(
             unread.map((d) =>
               updateDoc(
@@ -1170,7 +1325,7 @@ function App() {
 
     return unsub;
 
-  }, [user, selectedChatUser]);
+  }, [user, selectedChatUser, selectedChatIsRequest]);
 
 
   useEffect(() => {
@@ -1430,9 +1585,28 @@ function App() {
         .trim()
         .toLowerCase();
 
-    if (!q) return posts;
+    // Posts from private accounts are only shown to their followers
+    // (and to the owner).
+    const followingSet = new Set(profile?.following || []);
 
-    return posts.filter(
+    const hiddenAuthors = new Set(
+      users
+        .filter(
+          (u) =>
+            u.isPrivate &&
+            u.id !== user?.uid &&
+            !followingSet.has(u.id)
+        )
+        .map((u) => u.id)
+    );
+
+    const visible = posts.filter(
+      (p) => !hiddenAuthors.has(p.authorId)
+    );
+
+    if (!q) return visible;
+
+    return visible.filter(
       (p) =>
         `${p.text || ""} ${
           p.location || ""
@@ -1445,7 +1619,7 @@ function App() {
           .includes(q)
     );
 
-  }, [posts, search]);
+  }, [posts, search, users, profile?.following, user]);
 
 
   /* =======================================================
@@ -2075,12 +2249,169 @@ function App() {
   /* =======================================================
      FOLLOW
      ======================================================= */
-
-  async function follow(target) {
-    if (!target?.id || target.id === user.uid) return;
-
+     async function follow(target) {
+      if (!user?.uid || !target?.id || user.uid === target.id) return;
+  
+      try {
+        const isFollowing = (profile.following || []).includes(target.id);
+        const isPrivate = target.isPrivate === true;
+  
+        // Deterministic Fixed IDs:
+        const reqDocId = `${user.uid}_${target.id}`;
+        const notifDocId = `follow_req_${user.uid}_${target.id}`;
+        const legacyNotifId = `follow_${user.uid}_${target.id}`;
+  
+        // Check if a request already exists in Firestore:
+        const reqSnap = await getDoc(doc(db, "followRequests", reqDocId));
+        const hasPendingRequest = reqSnap.exists();
+  
+        if (!isFollowing && !hasPendingRequest) {
+          // --- 1. SEND FOLLOW / REQUEST ---
+          if (isPrivate) {
+            await setDoc(doc(db, "followRequests", reqDocId), {
+              requesterId: user.uid,
+              requesterName: profile.name,
+              requesterUsername: profile.username,
+              requesterPhotoURL: profile.photoURL || "",
+              targetId: target.id,
+              status: "pending",
+              createdAt: serverTimestamp(),
+            });
+  
+            // Target user-kku notification create panrom (Fixed ID)
+            await setDoc(doc(db, "notifications", notifDocId), {
+              receiverId: target.id,
+              senderId: user.uid,
+              senderName: profile.name,
+              senderUsername: profile.username,
+              senderPhotoURL: profile.photoURL || "",
+              type: "follow_request",
+              message: `${profile.name} requested to follow you.`,
+              read: false,
+              createdAt: serverTimestamp(),
+            });
+  
+            setToast(`Follow request sent to @${target.username}`);
+          } else {
+            const batch = writeBatch(db);
+            batch.update(doc(db, "users", user.uid), {
+              following: arrayUnion(target.id),
+            });
+            batch.update(doc(db, "users", target.id), {
+              followers: arrayUnion(user.uid),
+            });
+            await batch.commit();
+  
+            await setDoc(doc(db, "notifications", legacyNotifId), {
+              receiverId: target.id,
+              senderId: user.uid,
+              senderName: profile.name,
+              senderUsername: profile.username,
+              senderPhotoURL: profile.photoURL || "",
+              type: "follow",
+              message: `${profile.name} started following you.`,
+              read: false,
+              createdAt: serverTimestamp(),
+            });
+  
+            setToast(`Following @${target.username}`);
+          }
+        } else {
+          // --- 2. CANCEL REQUEST OR UNFOLLOW ---
+          // A. Public follow irundha unfollow pannum
+          if (isFollowing) {
+            const batch = writeBatch(db);
+            batch.update(doc(db, "users", user.uid), {
+              following: arrayRemove(target.id),
+            });
+            batch.update(doc(db, "users", target.id), {
+              followers: arrayRemove(user.uid),
+            });
+            await batch.commit().catch(() => {});
+          }
+  
+          // B. followRequests document direct delete
+          await deleteDoc(doc(db, "followRequests", reqDocId)).catch(() => {});
+  
+          // C. Target user-oda notification document direct delete (No query needed!)
+          await deleteDoc(doc(db, "notifications", notifDocId)).catch(() => {});
+          await deleteDoc(doc(db, "notifications", legacyNotifId)).catch(() => {});
+  
+          // D. Oruvelai auto-generated ID irundhaalum cleanup:
+          try {
+            const q = query(
+              collection(db, "notifications"),
+              where("receiverId", "==", target.id),
+              where("senderId", "==", user.uid)
+            );
+            const snap = await getDocs(q);
+            const cleanBatch = writeBatch(db);
+            snap.forEach((d) => {
+              const data = d.data();
+              if (data.type === "follow_request" || data.type === "follow") {
+                cleanBatch.delete(d.ref);
+              }
+            });
+            await cleanBatch.commit();
+          } catch (_) {}
+  
+          setToast(hasPendingRequest ? "Request cancelled" : `Unfollowed @${target.username}`);
+        }
+      } catch (error) {
+        console.error("Follow action failed:", error);
+        setToast("Action failed. Try again.");
+      }
+    }
+  async function followImpl(target) {
     const following = profile.following || [];
     const isFollowing = following.includes(target.id);
+
+    // Private account: send (or cancel) a follow request instead.
+    const liveTarget = users.find((u) => u.id === target.id) || target;
+
+    if (!isFollowing && liveTarget.isPrivate) {
+      const requestRef = doc(
+        db,
+        "followRequests",
+        `${user.uid}_${target.id}`
+      );
+
+      try {
+        const existing = await getDocs(
+          query(
+            collection(db, "followRequests"),
+            where("requesterId", "==", user.uid),
+            where("targetId", "==", target.id),
+            limit(1)
+          )
+        );
+
+        if (!existing.empty) {
+          await deleteDoc(requestRef);
+          setToast("Follow request cancelled");
+        } else {
+          await setDoc(requestRef, {
+            requesterId: user.uid,
+            targetId: target.id,
+            status: "pending",
+            createdAt: serverTimestamp(),
+          });
+
+          await createNotification({
+            receiverId: target.id,
+            type: "follow_request",
+            message: `${profile.name} requested to follow you.`,
+          });
+
+          setToast(`Follow request sent to @${target.username}`);
+        }
+      } catch (error) {
+        console.error("Follow request:", error);
+        setToast(error.message || "Could not send follow request");
+      }
+
+      return;
+    }
 
     try {
       const batch = writeBatch(db);
@@ -2112,6 +2443,93 @@ function App() {
     } catch (error) {
       console.error("Follow:", error);
       setToast(error.message || "Could not update follow");
+    }
+  }
+
+
+  /* =======================================================
+     FOLLOW REQUEST: ACCEPT / DECLINE
+     ======================================================= */
+
+  async function acceptFollowRequest(requesterId) {
+    if (!requesterId) return;
+
+    try {
+      // We can only flip the request's own status — the requester's
+      // client finishes the actual follow once it sees "approved".
+      await updateDoc(
+        doc(db, "followRequests", `${requesterId}_${user.uid}`),
+        {
+          status: "approved",
+          respondedAt: serverTimestamp(),
+        }
+      );
+
+      await createNotification({
+        receiverId: requesterId,
+        type: "follow_accepted",
+        message: `${profile.name} accepted your follow request.`,
+      });
+
+      setToast("Follow request accepted");
+    } catch (error) {
+      console.error("Accept follow request:", error);
+      setToast(error.message || "Could not accept request");
+    }
+  }
+
+  async function declineFollowRequest(requesterId) {
+    if (!requesterId) return;
+
+    try {
+      await deleteDoc(
+        doc(db, "followRequests", `${requesterId}_${user.uid}`)
+      );
+      setToast("Follow request deleted");
+    } catch (error) {
+      console.error("Decline follow request:", error);
+      setToast(error.message || "Could not delete request");
+    }
+  }
+
+
+  /* =======================================================
+     MESSAGE REQUEST: ACCEPT / DELETE
+     ======================================================= */
+
+  async function acceptMessageRequest(target) {
+    if (!target?.id) return;
+
+    try {
+      await updateDoc(
+        doc(db, "chats", getChatId(user.uid, target.id)),
+        {
+          acceptedBy: arrayUnion(user.uid),
+          unreadBy: arrayRemove(user.uid),
+        }
+      );
+
+      setToast(`You can now chat with ${target.name || "them"}`);
+    } catch (error) {
+      console.error("Accept message request:", error);
+      setToast(error.message || "Could not accept request");
+    }
+  }
+
+  async function declineMessageRequest(target) {
+    if (!target?.id) return;
+
+    try {
+      await deleteDoc(
+        doc(db, "chats", getChatId(user.uid, target.id))
+      );
+
+      setSelectedChatUser(null);
+      setMessages([]);
+      setToast("Message request deleted");
+    } catch (error) {
+      console.error("Delete message request:", error);
+      setToast(error.message || "Could not delete request");
     }
   }
 
@@ -2154,6 +2572,7 @@ function App() {
         id: user.uid,
         ...safeEdit,
         verified: profile.verified === true,
+        isPrivate: edit.isPrivate === true,
         name:
           edit.name?.trim() ||
           "Cheyyar User",
@@ -2630,6 +3049,20 @@ function App() {
 
     setSelectedChatUser(target);
 
+    // Opening the chat clears that person's "sent you a message" alerts.
+    notifications
+      .filter(
+        (n) =>
+          n.type === "message" &&
+          !n.read &&
+          n.senderId === target.id
+      )
+      .forEach((n) =>
+        updateDoc(doc(db, "notifications", n.id), { read: true }).catch(
+          () => {}
+        )
+      );
+
     const chatId =
       getChatId(
         user.uid,
@@ -2749,6 +3182,15 @@ function App() {
 
           lastSenderId:
             user.uid,
+
+          // sending = you are part of this chat; the other person
+          // gets the unread dot.
+          acceptedBy:
+            arrayUnion(user.uid),
+
+          unreadBy: [
+            selectedChatUser.id,
+          ],
         },
         {
           merge: true,
@@ -2830,7 +3272,162 @@ function App() {
 
     }
   }
+  /* =======================================================
+     DECLINE / DELETE FOLLOW REQUEST
+     ======================================================= */
 
+     async function declineFollowRequest(item) {
+      if (!item?.id) return;
+      const itemId = item.id;
+      const senderUid = item.senderId || item.requesterId;
+  
+      try {
+        // 1. notifications collection-la irundhu doc delete pannum
+        await deleteDoc(doc(db, "notifications", itemId)).catch(() => {});
+  
+        // 2. followRequests collection-la idhey doc id irundha delete pannum
+        await deleteDoc(doc(db, "followRequests", itemId)).catch(() => {});
+  
+        // 3. Oruvelai doc id follow_${senderUid}_${user.uid} format-la irundha rendayume clean pannum
+        if (senderUid) {
+          await deleteDoc(doc(db, "followRequests", `${senderUid}_${user.uid}`)).catch(() => {});
+          await deleteDoc(doc(db, "notifications", `follow_${senderUid}_${user.uid}`)).catch(() => {});
+        }
+  
+        setToast("Request removed");
+      } catch (err) {
+        console.error("Delete follow request error:", err);
+        setToast("Could not delete request");
+      }
+    }
+    /* =======================================================
+     ACCEPT FOLLOW REQUEST
+     ======================================================= */
+  async function acceptFollowRequest(notification) {
+    if (!notification) return;
+    const requesterId =
+      notification.senderId ||
+      notification.requesterId ||
+      (notification.id?.includes("_") ? notification.id.split("_")[1] : null);
+
+    if (!requesterId || requesterId === user.uid) {
+      setToast("Invalid request data");
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Current user followers list-la requester-ah serkkrom
+      batch.update(doc(db, "users", user.uid), {
+        followers: arrayUnion(requesterId),
+      });
+
+      // 2. Requester following list-la current user-ah serkkrom
+      batch.update(doc(db, "users", requesterId), {
+        following: arrayUnion(user.uid),
+      });
+
+      await batch.commit();
+
+      // 3. Request doc clean panrom
+      await deleteDoc(doc(db, "notifications", notification.id)).catch(() => {});
+      await deleteDoc(doc(db, "followRequests", `${requesterId}_${user.uid}`)).catch(() => {});
+
+      // 4. Follow accept notification anuprom
+      await addDoc(collection(db, "notifications"), {
+        receiverId: requesterId,
+        senderId: user.uid,
+        senderName: profile.name,
+        senderUsername: profile.username,
+        senderPhotoURL: profile.photoURL || "",
+        type: "follow_accept",
+        message: `${profile.name} accepted your follow request.`,
+        read: false,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+
+      setToast("Follow request accepted ✓");
+    } catch (err) {
+      console.error("Accept error:", err);
+      setToast("Could not accept request");
+    }
+  }
+/* =======================================================
+     NOTIFICATION / FOLLOW REQUEST ACTIONS
+     ======================================================= */
+
+     async function deleteNotification(notificationId) {
+      if (!notificationId) return;
+      try {
+        await deleteDoc(doc(db, "notifications", notificationId));
+        setToast("Notification deleted");
+      } catch (err) {
+        console.error("Delete notification failed:", err);
+        setToast("Could not delete notification");
+      }
+    }
+  
+    async function declineFollowRequest(request) {
+      if (!request?.id) return;
+      const reqId = request.id;
+      const senderUid =
+        request.requesterId ||
+        request.senderId ||
+        (reqId.includes("_") ? reqId.split("_")[0] : null);
+  
+      try {
+        // 1. followRequests doc-ah delete pannum
+        await deleteDoc(doc(db, "followRequests", reqId)).catch(() => {});
+  
+        // 2. notifications collection-la irundha delete pannum
+        await deleteDoc(doc(db, "notifications", reqId)).catch(() => {});
+        if (senderUid) {
+          await deleteDoc(doc(db, "notifications", `follow_${senderUid}_${user.uid}`)).catch(() => {});
+        }
+  
+        setToast("Request removed");
+      } catch (err) {
+        console.error("Decline error:", err);
+        setToast("Could not remove request");
+      }
+    }
+  
+    async function acceptFollowRequest(request) {
+      if (!request?.id) return;
+      const requesterId =
+        request.requesterId ||
+        request.senderId ||
+        (request.id.includes("_") ? request.id.split("_")[0] : null);
+  
+      if (!requesterId || requesterId === user.uid) {
+        setToast("Invalid request data");
+        return;
+      }
+  
+      try {
+        const batch = writeBatch(db);
+  
+        // Current user followers-la requester add aagum
+        batch.update(doc(db, "users", user.uid), {
+          followers: arrayUnion(requesterId),
+        });
+  
+        // Requester following-la current user add aagum
+        batch.update(doc(db, "users", requesterId), {
+          following: arrayUnion(user.uid),
+        });
+  
+        await batch.commit();
+  
+        // Documents clean pannidum
+        await declineFollowRequest(request);
+        setToast("Follow request accepted ✓");
+      } catch (err) {
+        console.error("Accept error:", err);
+        setToast("Could not accept request");
+      }
+    }
 
   /* =======================================================
      LOGOUT
@@ -3185,7 +3782,7 @@ function App() {
             aria-label="Notifications"
           >
             🔔
-            {notifications.some((n) => !n.read) && (
+            {bellUnread && (
               <i className="notification-dot" />
             )}
           </button>
@@ -3196,6 +3793,9 @@ function App() {
             aria-label="Messages"
           >
             💬
+            {messagesUnread && (
+              <i className="notification-dot" />
+            )}
           </button>
 
           <button
@@ -3297,13 +3897,13 @@ function App() {
                 <span>{icon}</span>
                 {label}
 
-                {id ===
-                  "notifications" &&
-                  notifications.some(
-                    (n) => !n.read
-                  ) && (
-                    <b className="nav-notification-dot" />
-                  )}
+                {id === "notifications" && bellUnread && (
+                  <b className="nav-notification-dot" />
+                )}
+
+                {id === "messages" && messagesUnread && (
+                  <b className="nav-notification-dot" />
+                )}
               </button>
             )
           )}
@@ -3345,6 +3945,7 @@ function App() {
                 (p) => p.authorId === viewingUser.id
               )}
               isFollowing={(profile.following || []).includes(viewingUser.id)}
+              followRequested={outgoingFollowRequests.includes(viewingUser.id)}
               onFollow={follow}
               onMessage={(target) => {
                 setViewingUser(null);
@@ -3512,6 +4113,7 @@ function App() {
               }
               profile={profile}
               onFollow={follow}
+              requestedIds={outgoingFollowRequests}
               onViewProfile={(target) => setViewingUser(target)}
               onMessage={(target) => {
                 openChat(target);
@@ -3613,37 +4215,23 @@ function App() {
           )}
 
 
-          {/* NOTIFICATIONS */}
+     {/* NOTIFICATIONS */}
 
-          {page === "notifications" && (
-            <NotificationsPage
-              notifications={
-                notifications
-              }
-              users={
-                users
-              }
-              onRead={
-                markNotificationRead
-              }
-              onNavigatePost={(postId) => {
-
-                const exists =
-                  posts.some(
-                    (p) =>
-                      p.id === postId
-                  );
-
-                if (exists) {
-                  setHighlightedPostId(postId);
-                  nav("home");
-                }
-
-              }}
-            />
-          )}
-
-
+     {page === "notifications" && (
+                <NotificationsPage
+                  notifications={notifications}
+                  users={users}
+                  incomingFollowRequests={incomingFollowRequests}
+                  onRead={(n) => updateDoc(doc(db, "notifications", n.id), { read: true })}
+                  onDeleteNotification={(id) => deleteDoc(doc(db, "notifications", id))}
+                  onAcceptFollow={acceptFollowRequest}
+                  onDeclineFollow={declineFollowRequest}
+                  onNavigatePost={(postId) => {
+                    setHighlightedPostId(postId);
+                    setPage("home");
+                  }}
+                />
+              )}
           {/* MESSAGES */}
 
           {page === "messages" && (
@@ -3657,6 +4245,8 @@ function App() {
               setSelectedUser={
                 openChat
               }
+              onAcceptRequest={acceptMessageRequest}
+              onDeclineRequest={declineMessageRequest}
               messages={messages}
               messageText={
                 messageText
@@ -4316,6 +4906,7 @@ function Explore({
   users,
   profile,
   onFollow,
+  requestedIds = [],
   onViewProfile,
   onMessage,
   search,
@@ -4339,6 +4930,7 @@ function Explore({
       <div className="user-grid">
         {users.map((u) => {
           const following = (profile.following || []).includes(u.id);
+          const requested = !following && requestedIds.includes(u.id);
 
           return (
             <div className="user-card" key={u.id}>
@@ -4367,10 +4959,10 @@ function Explore({
                 </button>
 
                 <button
-                  className={following ? "following" : "primary"}
+                  className={following || requested ? "following" : "primary"}
                   onClick={() => onFollow(u)}
                 >
-                  {following ? "Following" : "Follow"}
+                  {following ? "Following" : requested ? "Requested" : "Follow"}
                 </button>
               </div>
             </div>
@@ -4400,6 +4992,7 @@ function UserProfileView({
   currentProfile,
   targetPosts = [],
   isFollowing,
+  followRequested = false,
   onFollow,
   onMessage,
   onBack,
@@ -4413,6 +5006,7 @@ function UserProfileView({
   users = [],
 }) {
   const isSelf = target.id === currentUser.uid;
+  const locked = Boolean(target.isPrivate) && !isSelf && !isFollowing;
 
   return (
     <div className="profile-page user-profile-view">
@@ -4441,10 +5035,14 @@ function UserProfileView({
         {!isSelf && (
           <div className="profile-actions">
             <button
-              className={isFollowing ? "following" : "primary"}
+              className={isFollowing || followRequested ? "following" : "primary"}
               onClick={() => onFollow(target)}
             >
-              {isFollowing ? "Following" : "Follow"}
+              {isFollowing
+                ? "Following"
+                : followRequested
+                  ? "Requested"
+                  : "Follow"}
             </button>
 
             <button
@@ -4467,6 +5065,7 @@ function UserProfileView({
         <div className="profile-location">
           📍 {target.area || "Cheyyar"}
           {target.profession ? ` · ${target.profession}` : ""}
+          {target.isPrivate ? " · 🔒 Private" : ""}
         </div>
 
         <div className="stats">
@@ -4492,6 +5091,18 @@ function UserProfileView({
 
       </div>
 
+      {locked ? (
+        <div className="private-account-card">
+          <div className="private-account-icon">🔒</div>
+          <h3>This account is private</h3>
+          <p>
+            {followRequested
+              ? "Your follow request is waiting for approval."
+              : "Follow this account to see their stories and reels."}
+          </p>
+        </div>
+      ) : (
+      <>
       <ProfileReels uid={target.id} isOwner={false} />
 
       <div className="profile-posts">
@@ -4526,6 +5137,8 @@ function UserProfileView({
         )}
 
       </div>
+      </>
+      )}
 
     </div>
   );
@@ -5411,6 +6024,35 @@ function ProfileEditModal({
               />
             </div>
           </div>
+
+          <div className="premium-field full">
+            <label>Account privacy</label>
+            <div className="privacy-toggle-row">
+              <div>
+                <strong>
+                  {edit.isPrivate ? "🔒 Private account" : "🌍 Public account"}
+                </strong>
+                <small>
+                  {edit.isPrivate
+                    ? "Only people you approve can follow you and see your posts."
+                    : "Anyone in Cheyyar can follow you and see your posts."}
+                </small>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={edit.isPrivate === true}
+                className={
+                  edit.isPrivate ? "privacy-switch on" : "privacy-switch"
+                }
+                onClick={() =>
+                  setEdit({ ...edit, isPrivate: !edit.isPrivate })
+                }
+              >
+                <span />
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="premium-profile-footer">
@@ -5466,6 +6108,8 @@ function Messages({
   messageEndRef,
   currentUser,
   onViewProfile,
+  onAcceptRequest,
+  onDeclineRequest,
 }) {
 
   const [chatSearch, setChatSearch] =
@@ -5509,8 +6153,13 @@ function Messages({
 
       if (!partner) return;
 
+      // Chats that were only opened (no message sent) are not conversations.
+      if (!chat.lastMessage) return;
+
       byPartner.set(partnerId, {
         ...partner,
+        unread: (chat.unreadBy || []).includes(myUid),
+        isRequest: isMessageRequest(chat, myUid, following, followers),
         lastMessage: chat.lastMessage || "",
         lastSenderId: chat.lastSenderId || "",
         updatedAt: chat.updatedAt || null,
@@ -5520,22 +6169,18 @@ function Messages({
 
     return Array.from(byPartner.values());
 
-  }, [myChats, users, myUid]);
+  }, [myChats, users, myUid, following, followers]);
 
   const primaryConversations = useMemo(
     () =>
-      conversations.filter(
-        (u) => following.has(u.id) || followers.has(u.id)
-      ),
-    [conversations, following, followers]
+      conversations.filter((u) => !u.isRequest),
+    [conversations]
   );
 
   const requestConversations = useMemo(
     () =>
-      conversations.filter(
-        (u) => !following.has(u.id) && !followers.has(u.id)
-      ),
-    [conversations, following, followers]
+      conversations.filter((u) => u.isRequest),
+    [conversations]
   );
 
   const searching = chatSearch.trim().length > 0;
@@ -5568,6 +6213,15 @@ function Messages({
     selectedUser
       ? users.find((u) => u.id === selectedUser.id) || selectedUser
       : null;
+
+  const selectedIsRequest = liveSelectedUser
+    ? Boolean(
+        conversations.find((c) => c.id === liveSelectedUser.id)?.isRequest
+      )
+    : false;
+
+  const primaryUnread = primaryConversations.some((u) => u.unread);
+  const requestUnread = requestConversations.some((u) => u.unread);
 
 
   return (
@@ -5628,6 +6282,7 @@ function Messages({
                   onClick={() => setInboxTab("primary")}
                 >
                   Messages
+                  {primaryUnread && <i className="chat-tab-dot" />}
                 </button>
 
                 <button
@@ -5645,6 +6300,7 @@ function Messages({
                       {requestConversations.length}
                     </span>
                   )}
+                  {requestUnread && <i className="chat-tab-dot" />}
                 </button>
 
               </div>
@@ -5661,10 +6317,10 @@ function Messages({
 
                 <button
                   className={
-                    liveSelectedUser?.id ===
+                    (liveSelectedUser?.id ===
                     u.id
                       ? "chat-user active"
-                      : "chat-user"
+                      : "chat-user") + (u.unread ? " unread" : "")
                   }
                   key={u.id}
                   onClick={() =>
@@ -5697,6 +6353,8 @@ function Messages({
                       {timeAgo(u.updatedAt)}
                     </span>
                   )}
+
+                  {u.unread && <i className="chat-unread-dot" />}
 
                 </button>
 
@@ -5883,6 +6541,36 @@ function Messages({
 
               {/* COMPOSER */}
 
+              {selectedIsRequest ? (
+                <div className="chat-request-bar">
+                  <p>
+                    <strong>{liveSelectedUser.name || "This person"}</strong>{" "}
+                    wants to send you a message. They won&apos;t see that
+                    you&apos;ve read it until you accept.
+                  </p>
+
+                  <div className="chat-request-actions">
+                    <button
+                      type="button"
+                      className="chat-request-accept"
+                      onClick={async () => {
+                        await onAcceptRequest?.(liveSelectedUser);
+                        setInboxTab("primary");
+                      }}
+                    >
+                      Accept
+                    </button>
+
+                    <button
+                      type="button"
+                      className="chat-request-delete"
+                      onClick={() => onDeclineRequest?.(liveSelectedUser)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <form
                 className="chat-composer"
                 onSubmit={
@@ -5941,6 +6629,7 @@ function Messages({
                 </button>
 
               </form>
+              )}
 
             </>
 
@@ -5959,176 +6648,157 @@ function Messages({
    NOTIFICATIONS
    ========================================================= */
 
-function NotificationsPage({
-  notifications,
-  onRead,
-  onNavigatePost,
-  users,
-}) {
-
-  // Notification documents keep sender snapshots for history, but the UI
-  // resolves the sender from the live users collection so profile changes
-  // appear immediately in existing notifications.
-  const liveUsers = users || [];
-
-  return (
-    <div className="notifications-page">
-
-      <div className="page-heading">
-
-        <span>
-          🔔 Notifications
-        </span>
-
-        <p>
-          See what is happening around your profile.
-        </p>
-
-      </div>
-
-
-      <div className="notification-list">
-
-        {notifications.map(
-          (notification) => (
-
-            <button
-              key={
-                notification.id
-              }
-              className={
-                notification.read
-                  ? "notification-item"
-                  : "notification-item unread"
-              }
-              onClick={() => {
-
-                onRead(
-                  notification
-                );
-
-                if (
-                  notification.postId
-                ) {
-                  onNavigatePost(
-                    notification.postId
-                  );
-                }
-
-              }}
-            >
-
-              <Avatar
-                profile={{
-                  ...notification,
-                  ...(liveUsers.find(
-                    (u) => u.id === notification.senderId
-                  ) || {}),
-                  name:
-                    liveUsers.find(
-                      (u) => u.id === notification.senderId
-                    )?.name ||
-                    notification.senderName,
-
-                  username:
-                    liveUsers.find(
-                      (u) => u.id === notification.senderId
-                    )?.username ||
-                    notification.senderUsername,
-
-                  photoURL:
-                    liveUsers.find(
-                      (u) => u.id === notification.senderId
-                    )?.photoURL ||
-                    notification.senderPhotoURL ||
-                    "",
+   function NotificationsPage({
+    notifications = [],
+    onRead,
+    onDeleteNotification,
+    onAcceptFollow,
+    onDeclineFollow,
+    onNavigatePost,
+    users = [],
+    incomingFollowRequests = [],
+  }) {
+    const liveUsers = users || [];
+    const safeIncoming = Array.isArray(incomingFollowRequests) ? incomingFollowRequests : [];
+  
+    // 1. Pending follow requests-kku sender ID list edukrom
+    const pendingSenderIds = new Set(
+      safeIncoming.map((req) => req.requesterId || req.senderId).filter(Boolean)
+    );
+  
+    // 2. Notifications-ah process panrom (Duplicate follow cards prevent panna)
+    const renderedFollowSenders = new Set();
+    const visibleNotifications = [];
+  
+    for (const n of notifications || []) {
+      const isFollowRequest =
+        n.type === "follow_request" ||
+        n.type === "request" ||
+        n.status === "pending" ||
+        n.message?.toLowerCase().includes("requested to follow");
+  
+      if (isFollowRequest) {
+        const senderUid =
+          n.senderId ||
+          n.requesterId ||
+          (n.id?.includes("_") ? n.id.split("_")[1] : null);
+  
+        // A. Oruvelai sender cancel pannirundha (pending-la illana) hide aagidum:
+        if (!pendingSenderIds.has(senderUid)) {
+          continue;
+        }
+  
+        // B. Orey sender kitta irundhu already oru card add aagirundha, duplicate create aaga koodadhu:
+        if (renderedFollowSenders.has(senderUid)) {
+          continue;
+        }
+  
+        renderedFollowSenders.add(senderUid);
+        visibleNotifications.push(n);
+      } else {
+        // Normal notification (like, comment, share)
+        visibleNotifications.push(n);
+      }
+    }
+  
+    return (
+      <div className="notifications-page">
+        <div className="page-heading">
+          <span>🔔 Notifications</span>
+          <p>See what is happening around your profile.</p>
+        </div>
+  
+        <div className="notification-list">
+          {visibleNotifications.map((notification) => {
+            const senderUid =
+              notification.senderId ||
+              notification.requesterId ||
+              (notification.id?.includes("_") ? notification.id.split("_")[1] : null);
+  
+            const sender = liveUsers.find((u) => u.id === senderUid) || {};
+  
+            const senderProfile = {
+              ...notification,
+              ...sender,
+              name: sender.name || notification.senderName || "Cheyyar User",
+              username: sender.username || notification.senderUsername || "member",
+              photoURL: sender.photoURL || notification.senderPhotoURL || "",
+              verified: sender.verified === true,
+            };
+  
+            const isFollowRequest =
+              notification.type === "follow_request" ||
+              notification.type === "request" ||
+              notification.status === "pending" ||
+              notification.message?.toLowerCase().includes("requested to follow");
+  
+            return (
+              <div
+                key={notification.id}
+                className={notification.read ? "notification-item" : "notification-item unread"}
+                onClick={() => {
+                  onRead?.(notification);
+                  if (notification.postId) {
+                    onNavigatePost?.(notification.postId);
+                  }
                 }}
-                size="small"
-              />
-
-
-              <div className="notification-content">
-
-                <UserName
-                  profile={{
-                    id: notification.senderId,
-                    name:
-                      liveUsers.find(
-                        (u) => u.id === notification.senderId
-                      )?.name ||
-                      notification.senderName,
-
-                    username:
-                      liveUsers.find(
-                        (u) => u.id === notification.senderId
-                      )?.username ||
-                      notification.senderUsername,
-
-                    photoURL:
-                      liveUsers.find(
-                        (u) => u.id === notification.senderId
-                      )?.photoURL ||
-                      notification.senderPhotoURL ||
-                      "",
-
-                    verified:
-                      liveUsers.find(
-                        (u) => u.id === notification.senderId
-                      )?.verified === true,
-                  }}
-                />
-
-                <p>
-                  {notification.message}
-                </p>
-
-                <span>
-                  {timeAgo(
-                    notification.createdAt
-                  )}
-                </span>
-
+              >
+                <Avatar profile={senderProfile} size="small" />
+  
+                <div className="notification-content">
+                  <UserName profile={senderProfile} />
+                  <p>{notification.message}</p>
+                  <span>{timeAgo(notification.createdAt)}</span>
+  
+                  <div className="notification-actions-row">
+                    {isFollowRequest && (
+                      <button
+                        type="button"
+                        className="notif-btn notif-accept-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAcceptFollow?.(notification);
+                        }}
+                      >
+                        Accept
+                      </button>
+                    )}
+  
+                    <button
+                      type="button"
+                      className="notif-btn notif-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isFollowRequest) {
+                          onDeclineFollow?.(notification);
+                        } else {
+                          onDeleteNotification?.(notification.id);
+                        }
+                      }}
+                    >
+                      {isFollowRequest ? "Decline" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+  
+                <div className="notification-icon">
+                  {isFollowRequest ? "🔒" : notification.type === "like" ? "❤️" : notification.type === "comment" ? "💬" : "👤"}
+                </div>
               </div>
-
-
-              <div className="notification-icon">
-
-                {notification.type ===
-                  "like" && "❤️"}
-
-                {notification.type ===
-                  "comment" && "💬"}
-
-                {notification.type ===
-                  "follow" && "👤"}
-
-                {notification.type ===
-                  "share" && "↗️"}
-
-              </div>
-
-            </button>
-
-          )
-        )}
-
-
-        {!notifications.length && (
-
-          <Empty
-            icon="🔔"
-            title="No notifications"
-            text="When people interact with you, they will appear here."
-          />
-
-        )}
-
+            );
+          })}
+  
+          {!visibleNotifications.length && (
+            <Empty
+              icon="🔔"
+              title="No notifications"
+              text="When people interact with you, they will appear here."
+            />
+          )}
+        </div>
       </div>
-
-    </div>
-  );
-}
-
+    );
+  }
 
 /* =========================================================
    EMPTY
