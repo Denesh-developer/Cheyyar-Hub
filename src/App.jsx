@@ -1788,77 +1788,64 @@ function App() {
      NOTIFICATION CREATOR
      ======================================================= */
 
-  async function createNotification({
-    receiverId,
-    type,
-    message,
-    postId = "",
-  }) {
-
-    if (
-      !receiverId ||
-      receiverId === user.uid
-    ) {
-      return;
-    }
-
-    try {
-
-      await addDoc(
-        collection(
-          db,
-          "notifications"
-        ),
-        {
-          receiverId,
-          senderId: user.uid,
-
-          senderName:
-            profile.name,
-
-          senderUsername:
-            profile.username,
-
-          senderPhotoURL:
-            profile.photoURL || "",
-
-          type,
-          message,
-          postId,
-
-          read: false,
-
-          createdAt:
-            serverTimestamp(),
-        }
-      );
-
-      // Fire-and-forget: ask the Vercel function to send the phone push.
-      // Failure here must never break the like/comment/message itself.
+     async function createNotification({
+      receiverId,
+      type,
+      message,
+      postId = "",
+    }) {
+      if (!receiverId || receiverId === user?.uid) return;
+  
       try {
-        const idToken = await auth.currentUser.getIdToken();
-
-        fetch("/api/send-push", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({ receiverId, type, message }),
-        }).catch(() => {});
-      } catch {
-        // ignore
+        // 1. Firestore-la notification document create aagum
+        await addDoc(
+          collection(db, "notifications"),
+          {
+            receiverId,
+            senderId: user.uid,
+            senderName: profile?.name || "Cheyyar User",
+            senderUsername: profile?.username || "member",
+            senderPhotoURL: profile?.photoURL || "",
+            type,
+            message,
+            postId,
+            read: false,
+            createdAt: serverTimestamp(),
+          }
+        );
+  
+        // 2. Fire-and-forget push notification (Mobile safe)
+        try {
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            const idToken = await currentUser.getIdToken();
+  
+            // Native Android app-la relative path work aagadhu, so full URL thevai:
+            const isNative = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.();
+            const apiUrl = isNative
+              ? "https://cheyyar-hub.vercel.app/api/send-push" // Ungaloda live Vercel domain URL
+              : "/api/send-push";
+  
+            fetch(apiUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({ receiverId, type, message }),
+            }).catch((err) => {
+              console.warn("Push notification network warning:", err);
+            });
+          }
+        } catch (pushErr) {
+          // Push send aagalanaalum main action stop aaga koodadhu
+          console.warn("Push error ignored:", pushErr);
+        }
+  
+      } catch (error) {
+        console.error("Notification error:", error);
       }
-
-    } catch (error) {
-
-      console.error(
-        "Notification error:",
-        error
-      );
-
     }
-  }
 
 
   /* =======================================================
