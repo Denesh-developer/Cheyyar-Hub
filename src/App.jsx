@@ -20,6 +20,7 @@ import {
   collection,
   doc,
   addDoc,
+  getDoc,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -1787,77 +1788,64 @@ function App() {
      NOTIFICATION CREATOR
      ======================================================= */
 
-  async function createNotification({
-    receiverId,
-    type,
-    message,
-    postId = "",
-  }) {
-
-    if (
-      !receiverId ||
-      receiverId === user.uid
-    ) {
-      return;
-    }
-
-    try {
-
-      await addDoc(
-        collection(
-          db,
-          "notifications"
-        ),
-        {
-          receiverId,
-          senderId: user.uid,
-
-          senderName:
-            profile.name,
-
-          senderUsername:
-            profile.username,
-
-          senderPhotoURL:
-            profile.photoURL || "",
-
-          type,
-          message,
-          postId,
-
-          read: false,
-
-          createdAt:
-            serverTimestamp(),
-        }
-      );
-
-      // Fire-and-forget: ask the Vercel function to send the phone push.
-      // Failure here must never break the like/comment/message itself.
+     async function createNotification({
+      receiverId,
+      type,
+      message,
+      postId = "",
+    }) {
+      if (!receiverId || receiverId === user?.uid) return;
+  
       try {
-        const idToken = await auth.currentUser.getIdToken();
-
-        fetch("/api/send-push", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({ receiverId, type, message }),
-        }).catch(() => {});
-      } catch {
-        // ignore
+        // 1. Firestore-la notification document create aagum
+        await addDoc(
+          collection(db, "notifications"),
+          {
+            receiverId,
+            senderId: user.uid,
+            senderName: profile?.name || "Cheyyar User",
+            senderUsername: profile?.username || "member",
+            senderPhotoURL: profile?.photoURL || "",
+            type,
+            message,
+            postId,
+            read: false,
+            createdAt: serverTimestamp(),
+          }
+        );
+  
+        // 2. Fire-and-forget push notification (Mobile safe)
+        try {
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            const idToken = await currentUser.getIdToken();
+  
+            // Native Android app-la relative path work aagadhu, so full URL thevai:
+            const isNative = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.();
+            const apiUrl = isNative
+              ? "https://cheyyar-hub.vercel.app/api/send-push" // Ungaloda live Vercel domain URL
+              : "/api/send-push";
+  
+            fetch(apiUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${idToken}`,
+              },
+              body: JSON.stringify({ receiverId, type, message }),
+            }).catch((err) => {
+              console.warn("Push notification network warning:", err);
+            });
+          }
+        } catch (pushErr) {
+          // Push send aagalanaalum main action stop aaga koodadhu
+          console.warn("Push error ignored:", pushErr);
+        }
+  
+      } catch (error) {
+        console.error("Notification error:", error);
       }
-
-    } catch (error) {
-
-      console.error(
-        "Notification error:",
-        error
-      );
-
     }
-  }
 
 
   /* =======================================================
@@ -2252,113 +2240,93 @@ function App() {
      async function follow(target) {
       if (!user?.uid || !target?.id || user.uid === target.id) return;
   
+      const targetId = target.id;
+      const reqDocId = `${user.uid}_${targetId}`;
+      const notifDocId = `follow_req_${user.uid}_${targetId}`;
+      const legacyNotifId = `follow_${user.uid}_${targetId}`;
+  
+      const isFollowing = (profile?.following || []).includes(targetId);
+      const isPrivate = target.isPrivate === true;
+  
+      // Check if request already pending
+      let hasPendingRequest = (outgoingFollowRequests || []).includes(targetId);
       try {
-        const isFollowing = (profile.following || []).includes(target.id);
-        const isPrivate = target.isPrivate === true;
+        const snap = await getDoc(doc(db, "followRequests", reqDocId));
+        if (snap.exists()) hasPendingRequest = true;
+      } catch (_) {}
   
-        // Deterministic Fixed IDs:
-        const reqDocId = `${user.uid}_${target.id}`;
-        const notifDocId = `follow_req_${user.uid}_${target.id}`;
-        const legacyNotifId = `follow_${user.uid}_${target.id}`;
-  
-        // Check if a request already exists in Firestore:
-        const reqSnap = await getDoc(doc(db, "followRequests", reqDocId));
-        const hasPendingRequest = reqSnap.exists();
-  
+      try {
         if (!isFollowing && !hasPendingRequest) {
           // --- 1. SEND FOLLOW / REQUEST ---
           if (isPrivate) {
             await setDoc(doc(db, "followRequests", reqDocId), {
               requesterId: user.uid,
-              requesterName: profile.name,
-              requesterUsername: profile.username,
+              requesterName: profile.name || "Cheyyar User",
+              requesterUsername: profile.username || "member",
               requesterPhotoURL: profile.photoURL || "",
-              targetId: target.id,
+              targetId: targetId,
               status: "pending",
               createdAt: serverTimestamp(),
             });
   
-            // Target user-kku notification create panrom (Fixed ID)
             await setDoc(doc(db, "notifications", notifDocId), {
-              receiverId: target.id,
+              receiverId: targetId,
               senderId: user.uid,
-              senderName: profile.name,
-              senderUsername: profile.username,
+              senderName: profile.name || "Cheyyar User",
+              senderUsername: profile.username || "member",
               senderPhotoURL: profile.photoURL || "",
               type: "follow_request",
-              message: `${profile.name} requested to follow you.`,
+              message: `${profile.name || "Someone"} requested to follow you.`,
               read: false,
               createdAt: serverTimestamp(),
-            });
+            }, { merge: true }).catch((e) => console.warn(e));
   
             setToast(`Follow request sent to @${target.username}`);
           } else {
             const batch = writeBatch(db);
             batch.update(doc(db, "users", user.uid), {
-              following: arrayUnion(target.id),
+              following: arrayUnion(targetId),
             });
-            batch.update(doc(db, "users", target.id), {
+            batch.update(doc(db, "users", targetId), {
               followers: arrayUnion(user.uid),
             });
             await batch.commit();
   
             await setDoc(doc(db, "notifications", legacyNotifId), {
-              receiverId: target.id,
+              receiverId: targetId,
               senderId: user.uid,
-              senderName: profile.name,
-              senderUsername: profile.username,
+              senderName: profile.name || "Cheyyar User",
+              senderUsername: profile.username || "member",
               senderPhotoURL: profile.photoURL || "",
               type: "follow",
-              message: `${profile.name} started following you.`,
+              message: `${profile.name || "Someone"} started following you.`,
               read: false,
               createdAt: serverTimestamp(),
-            });
+            }).catch((e) => console.warn(e));
   
             setToast(`Following @${target.username}`);
           }
         } else {
-          // --- 2. CANCEL REQUEST OR UNFOLLOW ---
-          // A. Public follow irundha unfollow pannum
+          // --- 2. CANCEL REQUEST / UNFOLLOW ---
           if (isFollowing) {
             const batch = writeBatch(db);
             batch.update(doc(db, "users", user.uid), {
-              following: arrayRemove(target.id),
+              following: arrayRemove(targetId),
             });
-            batch.update(doc(db, "users", target.id), {
+            batch.update(doc(db, "users", targetId), {
               followers: arrayRemove(user.uid),
             });
-            await batch.commit().catch(() => {});
+            await batch.commit().catch((e) => console.warn(e));
           }
   
-          // B. followRequests document direct delete
           await deleteDoc(doc(db, "followRequests", reqDocId)).catch(() => {});
-  
-          // C. Target user-oda notification document direct delete (No query needed!)
           await deleteDoc(doc(db, "notifications", notifDocId)).catch(() => {});
           await deleteDoc(doc(db, "notifications", legacyNotifId)).catch(() => {});
   
-          // D. Oruvelai auto-generated ID irundhaalum cleanup:
-          try {
-            const q = query(
-              collection(db, "notifications"),
-              where("receiverId", "==", target.id),
-              where("senderId", "==", user.uid)
-            );
-            const snap = await getDocs(q);
-            const cleanBatch = writeBatch(db);
-            snap.forEach((d) => {
-              const data = d.data();
-              if (data.type === "follow_request" || data.type === "follow") {
-                cleanBatch.delete(d.ref);
-              }
-            });
-            await cleanBatch.commit();
-          } catch (_) {}
-  
           setToast(hasPendingRequest ? "Request cancelled" : `Unfollowed @${target.username}`);
         }
-      } catch (error) {
-        console.error("Follow action failed:", error);
+      } catch (err) {
+        console.error("Follow error:", err);
         setToast("Action failed. Try again.");
       }
     }
