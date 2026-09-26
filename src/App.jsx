@@ -1867,8 +1867,8 @@ function App() {
             // Native Android app-la relative path work aagadhu, so full URL thevai:
             const isNative = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.();
             const apiUrl = isNative
-              ? "https://cheyyar-hub.vercel.app/api/send-push" // Ungaloda live Vercel domain URL
-              : "/api/send-push";
+              ? "https://cheyyar-hub.vercel.app/api/send-push"; // Ungaloda live Vercel domain URL
+          
   
             fetch(apiUrl, {
               method: "POST",
