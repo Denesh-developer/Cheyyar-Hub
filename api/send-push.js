@@ -60,7 +60,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ skipped: true });
     }
 
-    const tokens = userSnap.data().fcmTokens || [];
+    const userData = userSnap.data() || {};
+    let tokens = userData.fcmTokens || [];
+
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      if (userData.fcmToken) {
+        tokens = [userData.fcmToken];
+      }
+    }
 
     if (tokens.length === 0) {
       return res.status(200).json({ skipped: true });
@@ -80,7 +87,7 @@ export default async function handler(req, res) {
       android: {
         priority: "high",
         notification: {
-          channelId: "cheyyar_default",
+          channelId: "cheyyar_alerts_v1",
           sound: "default",
         },
       },

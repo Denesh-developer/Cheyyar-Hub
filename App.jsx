@@ -394,7 +394,19 @@ function App() {
     };
   }, []);
 
-
+ // Native Google Auth Initialize
+ useEffect(() => {
+  if (Capacitor.isNativePlatform()) {
+    import("@codetrix-studio/capacitor-google-auth").then(({ GoogleAuth }) => {
+      GoogleAuth.initialize({
+        clientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
+        serverClientId: "788287014995-jhf9qav3qhbllpe7a7udevorlt0jpi31.apps.googleusercontent.com",
+        scopes: ["profile", "email"],
+        grantOfflineAccess: true,
+      });
+    }).catch((e) => console.error("GoogleAuth init error:", e));
+  }
+}, []);
   /* SEARCH */
 
   const [search, setSearch] =

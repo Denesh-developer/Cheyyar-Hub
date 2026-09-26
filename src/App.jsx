@@ -1628,37 +1628,43 @@ function App() {
      ======================================================= */
 
   // Native Android app (WebView) sends the Google ID token back here.
-  useEffect(() => {
+// Native Android WebView FCM Token Listener
+useEffect(() => {
+  // 1. Android Java side-ல இருந்து token வந்தா Firestore-ல update பண்ணும்
+  window.onReceiveFcmToken = async (token) => {
+    console.log("FCM Token received from Native Java:", token);
+    window.latestFcmToken = token;
 
-    window.onNativeGoogleToken = async (idToken) => {
+    if (user?.uid && token) {
       try {
-        const credential = GoogleAuthProvider.credential(idToken);
-        await signInWithCredential(auth, credential);
+        await updateDoc(doc(db, "users", user.uid), {
+          fcmTokens: arrayUnion(token),
+          fcmToken: token, // Single token field
+        });
+        console.log("FCM Token saved to Firestore user doc successfully!");
       } catch (err) {
-        console.error(err);
-        setAuthError(
-          err.message?.replace("Firebase: ", "") ||
-          "Google sign-in failed."
-        );
-      } finally {
-        setGoogleSubmitting(false);
+        console.error("Error saving FCM Token to Firestore:", err);
       }
-    };
+    }
+  };
 
-    window.onNativeGoogleError = (code) => {
-      setGoogleSubmitting(false);
-      // 12501 = user closed the account chooser
-      if (String(code) !== "12501") {
-        setAuthError("Google sign-in failed. Code: " + code);
-      }
-    };
+  // 2. User login ஆன உடனே ஏற்கனவே token கிடைச்சிருந்தா Firestore-ல link பண்ணும்
+  if (user?.uid && window.latestFcmToken) {
+    updateDoc(doc(db, "users", user.uid), {
+      fcmTokens: arrayUnion(window.latestFcmToken),
+      fcmToken: window.latestFcmToken,
+    }).catch((e) => console.warn("Failed to sync cached FCM token:", e));
+  }
 
-    return () => {
-      delete window.onNativeGoogleToken;
-      delete window.onNativeGoogleError;
-    };
+  // 3. AndroidBridge கிட்ட explicit-ஆ token கேட்கும் call
+  if (window.AndroidBridge && window.AndroidBridge.requestFcmToken) {
+    window.AndroidBridge.requestFcmToken();
+  }
 
-  }, []);
+  return () => {
+    delete window.onReceiveFcmToken;
+  };
+}, [user?.uid]);
 
 
   // Native Android app: save this device's FCM token on the user's doc so
