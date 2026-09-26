@@ -469,6 +469,41 @@ function App() {
   const [googleSubmitting, setGoogleSubmitting] =
     useState(false);
 
+  // 👇 INGA ADD PANNUNGA: In-App Update State & Config
+  const CURRENT_APP_VERSION = 1; // 👈 build.gradle-la versionCode 1 aaga irundhaal
+  const [updateInfo, setUpdateInfo] = useState({
+    show: false,
+    url: "",
+    notes: "",
+    force: false,
+  });
+
+  // 👇 Firestore Version Check Effect
+  useEffect(() => {
+    async function checkForAppUpdate() {
+      try {
+        const configRef = doc(db, "app_config", "version_control");
+        const configSnap = await getDoc(configRef);
+
+        if (configSnap.exists()) {
+          const data = configSnap.data();
+          if (data.latest_version_code > CURRENT_APP_VERSION) {
+            setUpdateInfo({
+              show: true,
+              url: data.apk_url || "",
+              notes: data.release_notes || "Bug fixes and improvements.",
+              force: data.force_update === true,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to check app update:", err);
+      }
+    }
+
+    checkForAppUpdate();
+  }, []);
+
   // True once a signed-in Google user has no /users profile doc yet, so we
   // show the one-time "pick a username" screen before letting them into
   // the app. Google already supplies name + photo; only username is asked.
@@ -486,7 +521,6 @@ function App() {
 
   const [onboardingError, setOnboardingError] =
     useState("");
-
   /* PAGE */
 
   const [page, setPage] =
@@ -4487,7 +4521,11 @@ function App() {
         />
       )}
 
-
+{/* IN-APP UPDATE MODAL */}
+<AppUpdateModal
+        updateInfo={updateInfo}
+        onClose={() => setUpdateInfo((prev) => ({ ...prev, show: false }))}
+      />
       {/* TOAST */}
 
       {toast && (
@@ -8347,6 +8385,134 @@ function ReelCommentsSheet({ reel, user, profile, users, onClose, onSubmit }) {
     </div>
   );
 }
+/* =========================================================
+   IN-APP UPDATE MODAL
+   ========================================================= */
 
+   function AppUpdateModal({ updateInfo, onClose }) {
+    if (!updateInfo?.show) return null;
+  
+    return (
+      <div
+        className="modal-backdrop update-modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-label="App Update Available"
+        style={{
+          position: "fixed",
+          inset: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.85)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 99999,
+          padding: "20px",
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        <div
+          style={{
+            backgroundColor: "#161622",
+            border: "1px solid #2a2a3c",
+            borderRadius: "20px",
+            padding: "28px 24px",
+            maxWidth: "380px",
+            width: "100%",
+            textAlign: "center",
+            color: "#ffffff",
+            boxShadow: "0 20px 40px rgba(0, 0, 0, 0.6)",
+            animation: "fadeIn 0.25s ease-out",
+          }}
+        >
+          <div style={{ fontSize: "48px", marginBottom: "12px", lineHeight: "1" }}>
+            🚀
+          </div>
+  
+          <h2
+            style={{
+              margin: "0 0 8px 0",
+              fontSize: "20px",
+              fontWeight: "700",
+              letterSpacing: "-0.5px",
+            }}
+          >
+            New Update Available!
+          </h2>
+  
+          <p
+            style={{
+              fontSize: "14px",
+              color: "#9ca3af",
+              margin: "0 0 18px 0",
+              lineHeight: "1.5",
+            }}
+          >
+            A new version of CheyyarHub is ready. Please install the latest APK to get all bug fixes and improvements.
+          </p>
+  
+          {updateInfo.notes && (
+            <div
+              style={{
+                backgroundColor: "#0d0d15",
+                borderRadius: "12px",
+                padding: "14px",
+                fontSize: "13px",
+                color: "#38bdf8",
+                textAlign: "left",
+                marginBottom: "20px",
+                border: "1px solid #1f1f2e",
+                lineHeight: "1.4",
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: "4px", color: "#60a5fa" }}>
+                What's New:
+              </strong>
+              <span style={{ color: "#d1d5db" }}>{updateInfo.notes}</span>
+            </div>
+          )}
+  
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <a
+              href={updateInfo.url}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                backgroundColor: "#2563eb",
+                color: "#ffffff",
+                textDecoration: "none",
+                padding: "12px 20px",
+                borderRadius: "12px",
+                fontWeight: "600",
+                fontSize: "15px",
+                display: "block",
+                boxShadow: "0 4px 14px rgba(37, 99, 235, 0.4)",
+                transition: "background-color 0.2s ease",
+              }}
+            >
+              Download & Update 📥
+            </a>
+  
+            {!updateInfo.force && (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  backgroundColor: "transparent",
+                  border: "none",
+                  color: "#6b7280",
+                  fontSize: "14px",
+                  cursor: "pointer",
+                  padding: "8px",
+                  fontWeight: "500",
+                }}
+              >
+                Later
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
 export default App;
