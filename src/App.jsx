@@ -1828,7 +1828,7 @@ function App() {
       setGoogleSubmitting(false);
     }
   }
-  /* =======================================================
+ /* =======================================================
      NOTIFICATION CREATOR
      ======================================================= */
 
@@ -1841,51 +1841,45 @@ function App() {
       if (!receiverId || receiverId === user?.uid) return;
   
       try {
-        // 1. Firestore-la notification document create aagum
-        await addDoc(
-          collection(db, "notifications"),
-          {
-            receiverId,
-            senderId: user.uid,
-            senderName: profile?.name || "Cheyyar User",
-            senderUsername: profile?.username || "member",
-            senderPhotoURL: profile?.photoURL || "",
-            type,
-            message,
-            postId,
-            read: false,
-            createdAt: serverTimestamp(),
-          }
-        );
+        // 1. Firestore-la in-app notification create aagum
+        await addDoc(collection(db, "notifications"), {
+          receiverId,
+          senderId: user.uid,
+          senderName: profile?.name || "Cheyyar User",
+          senderUsername: profile?.username || "member",
+          senderPhotoURL: profile?.photoURL || "",
+          type,
+          message,
+          postId,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
   
-        // 2. Fire-and-forget push notification (Mobile safe)
-        try {
-          const currentUser = auth.currentUser;
-          if (currentUser) {
-            const idToken = await currentUser.getIdToken();
+        // 2. Vercel backend serverless function call (Push notification dispatch)
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          const idToken = await currentUser.getIdToken();
+          const apiUrl = "https://cheyyar-hub.vercel.app/api/send-push";
   
-            // Native Android app-la relative path work aagadhu, so full URL thevai:
-            const isNative = typeof window !== "undefined" && window.Capacitor?.isNativePlatform?.();
-            const apiUrl = isNative
-              ? "https://cheyyar-hub.vercel.app/api/send-push"; // Ungaloda live Vercel domain URL
-          
-  
-            fetch(apiUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${idToken}`,
-              },
-              body: JSON.stringify({ receiverId, type, message }),
-            }).catch((err) => {
-              console.warn("Push notification network warning:", err);
+          fetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              receiverId,
+              type,
+              message,
+              postId,
+            }),
+          })
+            .then((res) => res.json())
+            .then((data) => console.log("Push API Response:", data))
+            .catch((err) => {
+              console.warn("Push notification fetch warning:", err);
             });
-          }
-        } catch (pushErr) {
-          // Push send aagalanaalum main action stop aaga koodadhu
-          console.warn("Push error ignored:", pushErr);
         }
-  
       } catch (error) {
         console.error("Notification error:", error);
       }
