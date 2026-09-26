@@ -635,41 +635,21 @@ function App() {
     useRef(new Set());
 
 
+
+
 /* =======================================================
      AUTH STATE
      ======================================================= */
 
      useEffect(() => {
-      // 1. Android redirect login-ஆக இருந்தால் result-ஐ handle பண்ணும்
-      getRedirectResult(auth)
-        .then((result) => {
-          if (result?.user) {
-            setUser(result.user);
-          }
-        })
-        .catch((err) => {
-          console.error("Redirect login error:", err);
-          if (err.code !== "auth/credential-already-in-use") {
-            setAuthError(err.message?.replace("Firebase: ", "") || "Google sign-in failed.");
-          }
-        })
-        .finally(() => {
-          // Redirect check முடிந்தவுடன் loading-ஐ false பண்ணும்
-          setAuthLoading(false);
-        });
-  
-      // 2. Normal auth listener (Auto login / already logged in check)
-      const unsub = onAuthStateChanged(
-        auth,
-        (u) => {
-          setUser(u);
-          setAuthLoading(false);
-        }
-      );
+      // 👈 getRedirectResult-ah complete-ah remove pannitu idha mattum vaiyunga
+      const unsub = onAuthStateChanged(auth, (u) => {
+        setUser(u);
+        setAuthLoading(false);
+      });
   
       return () => unsub();
     }, []);
-
 
   /* =======================================================
      USER PROFILE
@@ -1622,8 +1602,7 @@ function App() {
 
   }, [posts, search, users, profile?.following, user]);
 
-
- /* =======================================================
+/* =======================================================
      AUTH - Native Google Login & FCM Token Listeners
      ======================================================= */
 
@@ -1636,7 +1615,6 @@ function App() {
         const result = await signInWithCredential(auth, credential);
         console.log("Firebase Logged In Successfully:", result.user.uid);
         setUser(result.user);
-        setAuthLoading(false);
       } catch (err) {
         console.error("Firebase Sign-in error:", err);
         setAuthError(
@@ -1644,7 +1622,8 @@ function App() {
           "Google sign-in failed. Please try again."
         );
       } finally {
-        setGoogleSubmitting(false); // 👈 Loading spinner off aagidum
+        setGoogleSubmitting(false); // 👈 Button spinner stop aagum
+        setAuthLoading(false);      // 👈 Error vandhaalum loading screen close aagidum
       }
     };
 
