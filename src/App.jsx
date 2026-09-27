@@ -470,7 +470,7 @@ function App() {
     useState(false);
 
   // 👇 INGA ADD PANNUNGA: In-App Update State & Config
-  const CURRENT_APP_VERSION = 1; // 👈 build.gradle-la versionCode 1 aaga irundhaal
+  const CURRENT_APP_VERSION = 2; // 👈 build.gradle-la versionCode 1 aaga irundhaal
   const [updateInfo, setUpdateInfo] = useState({
     show: false,
     url: "",
@@ -8471,35 +8471,33 @@ function ReelCommentsSheet({ reel, user, profile, users, onClose, onSubmit }) {
             </div>
           )}
   
-         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            <button
-              type="button"
-              onClick={() => {
-                // Android WebView kulla irundha background auto-download trigger aagum
-                if (window.AndroidBridge && window.AndroidBridge.downloadAndInstallApk) {
-                  window.AndroidBridge.downloadAndInstallApk(updateInfo.url);
-                } else {
-                  // Laptop browser testing-kku fallback
-                  window.open(updateInfo.url, "_blank");
-                }
-              }}
-              style={{
-                backgroundColor: "#2563eb",
-                color: "#ffffff",
-                border: "none",
-                cursor: "pointer",
-                padding: "12px 20px",
-                borderRadius: "12px",
-                fontWeight: "600",
-                fontSize: "15px",
-                display: "block",
-                width: "100%",
-                boxShadow: "0 4px 14px rgba(37, 99, 235, 0.4)",
-                transition: "background-color 0.2s ease",
-              }}
-            >
-              Update Now 🚀
-            </button>
+  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+  // ✅ Ippadi update pannunga:
+<button
+  type="button"
+  onClick={() => {
+    if (window.AndroidBridge && typeof window.AndroidBridge.downloadAndInstallApk === "function") {
+      window.AndroidBridge.downloadAndInstallApk(updateInfo.url);
+    } else {
+      // WebView window.open block panninaalum browser-ku download poga idhu help pannum
+      window.location.assign(updateInfo.url);
+    }
+  }}
+  style={{
+    backgroundColor: "#2563eb",
+    color: "#ffffff",
+    border: "none",
+    cursor: "pointer",
+    padding: "12px 20px",
+    borderRadius: "12px",
+    fontWeight: "600",
+    fontSize: "15px",
+    display: "block",
+    width: "100%",
+  }}
+>
+  Update Now 🚀
+</button>
 
             {!updateInfo.force && (
               <button
