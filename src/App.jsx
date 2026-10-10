@@ -4108,7 +4108,7 @@ function App() {
       </button>
       <span className="bus-modal-title">Cheyyar Bus Timings</span>
       <a 
-        href="https://denesh-developer.github.io/Cheyyar-Bus/" 
+        href="https://cheyyar-bus.vercel.app/" 
         target="_blank" 
         rel="noreferrer"
         className="bus-open-tab-btn"
