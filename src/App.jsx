@@ -3780,10 +3780,10 @@ function App() {
     title="Developer Panel"
     aria-label="Developer Panel"
   >
-    <span className="dev-panel-icon">👨‍💻</span>
+    <span className="dev-panel-icon">🛡️</span>
     <span className="dev-panel-text">Developer Panel</span>
   </button>
-)}
+)}y
 
   {/* Founder / Developer Button */}
   <button
