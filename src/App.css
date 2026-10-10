@@ -7959,3 +7959,63 @@ video {
     display: block !important;
     background: #050609 !important;
   }
+  /* =========================================================
+   MOBILE DEVELOPER PANEL BUTTON FIX (ZERO OVERLAP)
+   ========================================================= */
+
+@media (max-width: 760px) {
+  /* Topbar spacing fix */
+  .topbar {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding: 0 10px !important;
+    gap: 8px !important;
+  }
+
+  .topbar .brand {
+    font-size: 17px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .top-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Developer Panel: Mobile-il compact icon button-aaga maarum */
+  .developer-panel-btn {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 11px !important;
+    font-size: 15px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Long text hide aagum */
+  .developer-panel-btn .dev-panel-text {
+    display: none !important;
+  }
+
+  .developer-panel-btn .dev-panel-icon {
+    margin: 0 !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .developer-panel-btn,
+  .founder-btn,
+  .top-bus-btn,
+  .top-message-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+  }
+}

@@ -3772,15 +3772,18 @@ function App() {
 
 
         <div className="top-actions">
-  {isDeveloper && (
-    <button
-      className="developer-panel-btn"
-      type="button"
-      onClick={() => nav("developer")}
-    >
-      👨‍💻 Developer Panel
-    </button>
-  )}
+        {isDeveloper && (
+  <button
+    className="developer-panel-btn"
+    type="button"
+    onClick={() => nav("developer")}
+    title="Developer Panel"
+    aria-label="Developer Panel"
+  >
+    <span className="dev-panel-icon">👨‍💻</span>
+    <span className="dev-panel-text">Developer Panel</span>
+  </button>
+)}
 
   {/* Founder / Developer Button */}
   <button
