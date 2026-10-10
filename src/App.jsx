@@ -140,15 +140,16 @@ function UserHandle({ profile, className = "" }) {
    NAVIGATION
    ========================================================= */
 
-const menu = [
-  ["home", "🏠", "Home"],
-  ["reels", "🎬", "Reels"],
-  ["trending", "🔥", "Trending"],
-  ["explore", "📍", "Explore Cheyyar"],
-  ["notifications", "🔔", "Notifications"],
-  ["messages", "💬", "Messages"],
-  ["profile", "👤", "Profile"],
-];
+   const menu = [
+    ["home", "🏠", "Home"],
+    ["bus", "🚌", "Bus Timings"],       // <-- Add here
+    ["trending", "🔥", "Trending"],
+    ["reels", "🎬", "Reels"],
+    ["explore", "📍", "Explore Cheyyar"],
+    ["notifications", "🔔", "Notifications"],
+    ["messages", "💬", "Messages"],
+    ["profile", "👤", "Profile"],
+  ];
 
 
 /* =========================================================
@@ -3771,61 +3772,67 @@ function App() {
 
 
         <div className="top-actions">
+  {isDeveloper && (
+    <button
+      className="developer-panel-btn"
+      type="button"
+      onClick={() => nav("developer")}
+    >
+      👨‍💻 Developer Panel
+    </button>
+  )}
 
-        {isDeveloper && (
+  {/* Founder / Developer Button */}
   <button
-    className="developer-panel-btn"
+    className="founder-btn"
     type="button"
-    onClick={() => nav("developer")}
+    onClick={() => setFounderOpen(true)}
+    aria-label="Open Founder and Developer"
+    title="Founder & Developer"
   >
-    <span className="dp-icon">👨‍💻</span>
-    <span className="dp-full"> Developer Panel</span>
-    <span className="dp-short">Dev</span>
+    <span className="founder-btn-icon">👨‍💻</span>
+    <span>Founder & Developer</span>
   </button>
-)}
 
-          <button
-            className="founder-btn"
-            type="button"
-            onClick={() => setFounderOpen(true)}
-            aria-label="Open Founder and Developer"
-            title="Founder & Developer"
-          >
-            <span className="founder-btn-icon">👨‍💻</span>
-            <span>Founder & Developer</span>
-          </button>
+  {/* Dev Button-te aduthu Bus Timings Button */}
+  <button
+    className="top-bus-btn"
+    type="button"
+    onClick={() => nav("bus")}
+    aria-label="Cheyyar Bus Timings"
+    title="Cheyyar Bus Timings"
+  >
+    <span className="top-bus-btn-icon">🚌</span>
+    <span className="top-bus-btn-text">Bus Timings</span>
+  </button>
 
-          <button
-            onClick={() => nav("notifications")}
-            className="icon-btn"
-            aria-label="Notifications"
-          >
-            🔔
-            {bellUnread && (
-              <i className="notification-dot" />
-            )}
-          </button>
+  <button
+    onClick={() => nav("notifications")}
+    className="icon-btn"
+    aria-label="Notifications"
+  >
+    🔔
+    {notifications.some((n) => !n.read) && (
+      <i className="notification-dot" />
+    )}
+  </button>
 
-          <button
-            onClick={() => nav("messages")}
-            className="top-message-btn"
-            aria-label="Messages"
-          >
-            💬
-            {messagesUnread && (
-              <i className="notification-dot" />
-            )}
-          </button>
+  <button
+    onClick={() => nav("messages")}
+    className="top-message-btn"
+    aria-label="Messages"
+  >
+    💬
+  </button>
 
-          <button
-            onClick={() => nav("profile")}
-            className="user-chip"
-          >
-            <Avatar profile={profile} size="small" />
-            <UserHandle profile={profile} />
-          </button>
-
-        </div>
+  <button
+    onClick={() => nav("profile")}
+    className="user-chip"
+  >
+    <Avatar profile={profile} size="small" />
+    <UserHandle profile={profile} />
+  </button>
+</div>
 
       </header>
 
@@ -4015,6 +4022,7 @@ function App() {
                   nav("create")
                 }
               />
+              
 
               <div className="section-title">
 
@@ -4084,6 +4092,36 @@ function App() {
 
             </>
           )}
+{/* FULLSCREEN BUS TIMINGS MODAL EMBED */}
+{page === "bus" && (
+  <div className="bus-fullscreen-modal">
+    <div className="bus-modal-topbar">
+      <button 
+        type="button" 
+        className="bus-back-btn" 
+        onClick={() => nav("home")}
+      >
+        ← Back to Cheyyar Hub
+      </button>
+      <span className="bus-modal-title">Cheyyar Bus Timings</span>
+      <a 
+        href="https://denesh-developer.github.io/Cheyyar-Bus/" 
+        target="_blank" 
+        rel="noreferrer"
+        className="bus-open-tab-btn"
+        title="Open in Full Tab"
+      >
+        ↗
+      </a>
+    </div>
+    <iframe
+      src="https://denesh-developer.github.io/Cheyyar-Bus/"
+      title="Cheyyar Bus Timings"
+      className="bus-fullscreen-iframe"
+      allow="fullscreen"
+    />
+  </div>
+)}
 
 
           {/* TRENDING */}

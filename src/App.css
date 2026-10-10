@@ -7838,3 +7838,124 @@ video {
   color: #ff8d9c;
   border-color: rgba(255, 77, 103, 0.3);
 }
+/* Topbar Bus Timings Button */
+.top-bus-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.top-bus-btn:hover {
+  color: #ffffff;
+  border-color: rgba(255, 92, 53, 0.45);
+  background: rgba(255, 92, 53, 0.12);
+  transform: translateY(-1px);
+}
+
+.top-bus-btn-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Mobile Responsive - Screen-kulla perfect fit aaga */
+@media (max-width: 760px) {
+  .top-bus-btn {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 11px;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .top-bus-btn-text {
+    display: none; /* Mobile-la text maraindhu, icon mattum neat-a theriyum */
+  }
+}
+
+@media (max-width: 430px) {
+  .top-bus-btn {
+    width: 35px;
+    height: 35px;
+    min-width: 35px;
+  }
+}
+/* =========================================================
+   TRUE FULLSCREEN BUS TIMINGS VIEW IN CHEYYAR HUB
+   ========================================================= */
+   .bus-fullscreen-modal {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    z-index: 999999 !important;
+    background: #050609 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  
+  .bus-modal-topbar {
+    height: 48px;
+    background: #0a0c11;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    flex-shrink: 0;
+  }
+  
+  .bus-back-btn {
+    background: rgba(255, 92, 53, 0.12);
+    border: 1px solid rgba(255, 92, 53, 0.35);
+    color: #ff8a52;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .bus-modal-title {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: "Space Grotesk", sans-serif;
+  }
+  
+  .bus-open-tab-btn {
+    color: #a9aeba;
+    font-size: 16px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    text-decoration: none;
+  }
+  
+  .bus-fullscreen-iframe {
+    flex: 1 !important;
+    width: 100vw !important;
+    height: calc(100dvh - 48px) !important;
+    border: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+    background: #050609 !important;
+  }
