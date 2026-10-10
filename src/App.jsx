@@ -3783,7 +3783,7 @@ function App() {
     <span className="dev-panel-icon">🛡️</span>
     <span className="dev-panel-text">Developer Panel</span>
   </button>
-)}y
+)}
 
   {/* Founder / Developer Button */}
   <button
